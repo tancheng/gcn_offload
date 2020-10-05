@@ -9,14 +9,13 @@
 #  --offload-mode <pattern> Choose a offload mode for the GCN inference
 #                           python : use the customized python code
 #                           c++    : use the customized c++ code
-#                           arena  : use ARENA library
+#                           mpi    : distribute with the customized mpi code
+#                           arena  : distribute with the ARENA library
 #                           cgra   : offload compute to CGRA for acceleration
 #
-#  --timing            Print timing stats
 #  --trace             Display line-trace
 #
 # Graph Nerual Network. Choose an offload computation mode to execute.
-# Use --timing to display timing statistics about the execution.
 #
 # Author : Cheng Tan
 # Date   : Oct 3, 2020
@@ -41,12 +40,12 @@ from torch_geometric.datasets import Planetoid
 
 class ArgumentParserWithCustomError(argparse.ArgumentParser):
   def error( s, msg = "" ):
-    if ( msg ): print("\n ERROR: %s" % msg)
-    print("")
+    if ( msg ): trace("\n ERROR: %s" % msg)
+    trace("")
     file = open( sys.argv[0] )
     for ( lineno, line ) in enumerate( file ):
       if ( line[0] != '#' ): sys.exit(msg != "")
-      if ( (lineno == 2) or (lineno >= 4) ): print( line[1:].rstrip("\n") )
+      if ( (lineno == 2) or (lineno >= 4) ): trace( line[1:].rstrip("\n") )
 
 def parse_cmdline():
   parser = ArgumentParserWithCustomError( add_help=False )
@@ -66,14 +65,12 @@ def parse_cmdline():
                        help = 'train network'                              )
 
   parser.add_argument( "--offload-mode",
-                       choices = ["python", "c++", "arena", "cgra"],
+                       choices = ["python", "c++", "mpi", "arena", "cgra"],
                        default = "python"                                  )
 
-  parser.add_argument( "--timing",
-                       action  = "store_true"                              )
-
   parser.add_argument( "--trace",
-                       action  = "store_true"                              )
+                       action  = "store_true",
+                       default = False                                     )
 
   opts = parser.parse_args()
   if opts.help: parser.error()
@@ -88,7 +85,7 @@ dataset = Planetoid(root='/tmp/Cora', name='Cora')
 class custom_python:
   def mm(self, x, weight):
   #  out = [[0 for _ in weight[0]] for _ in x]
-  #  print("out: ", len(out), len(out[0]))
+  #  trace("out: ", len(out), len(out[0]))
   #  for i in range(len(x)):
   #    for j in range(len(weight[0])):
   #      for k in range(len(x[0])):
@@ -129,9 +126,18 @@ def verify(a, b):
   for i in range(len(a)):
     for j in range(len(a[0])):
       if abs(a[i][j] - b[i][j]) > 0.001:
-        print(i, j, a[i][j], b[i][j])
+        trace(i, j, a[i][j], b[i][j])
         return False
   return True
+
+#-------------------------------------------------------------------------
+# trace output in each step
+#-------------------------------------------------------------------------
+
+def trace(*info):
+  opts = parse_cmdline()
+  if opts.trace:
+    print(*info)
 
 class Net(torch.nn.Module):
     def __init__(self):
@@ -141,34 +147,36 @@ class Net(torch.nn.Module):
 
     def forward(self, data):
 
-        print("------------------------------- init start -------------------------------------")
+        trace("------------------------------- init start -------------------------------------")
+        start_time = time.time()
         x, edge_index = data.x, data.edge_index
-        print("[gold] feature ", len(x), " x ", len(x[0]), ": ")
-        print(x)
-        print("-------------------------------- init done -------------------------------------")
-        print()
+        trace("[gold] feature ", len(x), " x ", len(x[0]), ": ")
+        trace(x)
+        trace("-------------------------------- init done -------------------------------------")
+        trace()
 
-        print("------------------------------- conv1 start ------------------------------------")
+        trace("------------------------------- conv1 start ------------------------------------")
         x = self.conv1(x, edge_index)
-        print("[gold] conv1 result ", len(x), " x ", len(x[0]), ": ")
-        print(x)
-        print("-------------------------------- conv1 done ------------------------------------")
-        print()
+        trace("[gold] conv1 result ", len(x), " x ", len(x[0]), ": ")
+        trace(x)
+        trace("-------------------------------- conv1 done ------------------------------------")
+        trace()
 
-        print("------------------------------- relu start -------------------------------------")
+        trace("------------------------------- relu start -------------------------------------")
         x = F.relu(x)
-        print("[gold] relu: ")
-        print(x)
-        print("------------------------------- relu finished ----------------------------------")
-        print()
+        trace("[gold] relu: ")
+        trace(x)
+        trace("-------------------------------- relu done -------------------------------------")
+        trace()
 
-        print("------------------------------- conv2 start ------------------------------------")
+        trace("------------------------------- conv2 start ------------------------------------")
         x = F.dropout(x, training=self.training)
         x = self.conv2(x, edge_index)
-        print("[gold] out (", len(x), "x", len(x[0]), "):")
-        print(x)
-        print("------------------------------- conv2 finished ---------------------------------")
-        print()
+        trace("[gold] out (", len(x), "x", len(x[0]), "):")
+        trace(x)
+        trace("-------------------------------- conv2 done ------------------------------------")
+        print("*** %s seconds ***" % round(time.time() - start_time, 2))
+        trace()
 
         # essential for training
         # return F.log_softmax(x, dim=1)
@@ -199,25 +207,25 @@ def main():
         optimizer.step()
   
     torch.save(model.state_dict(), PATH)
-    # print(model.state_dict())
-    print("[gold] train GCN and store weights into ", PATH)
+    # trace(model.state_dict())
+    trace("[gold] train GCN and store weights into ", PATH)
   
   else:
-    print()
+    trace()
     print("=============================== custom offload =================================") 
-    print()
-    print("------------------------------ load weight start -------------------------------") 
+    trace()
+    trace("------------------------------ load weight start -------------------------------") 
     model.load_state_dict(torch.load(PATH))
-    print("[custom] load weights: ")
-    # print( model.state_dict())
+    trace("[custom] load weights: ")
+    # trace( model.state_dict())
     weight1 = model.state_dict()["conv1.weight"]
     bias1 = model.state_dict()["conv1.bias"]
     weight2 = model.state_dict()["conv2.weight"]
     bias2 = model.state_dict()["conv2.bias"]
-    # print("[custom] weight1 ", len(model.state_dict()["conv1.weight"].numpy()), " x ", len(model.state_dict()["conv1.weight"][0].numpy()), ": ")
-    # print(weight1)
-    print("----------------------------- weight loading done ------------------------------")
-    print()
+    # trace("[custom] weight1 ", len(model.state_dict()["conv1.weight"].numpy()), " x ", len(model.state_dict()["conv1.weight"][0].numpy()), ": ")
+    # trace(weight1)
+    trace("----------------------------- weight loading done ------------------------------")
+    trace()
   
     # Custom computation for offload and verification.
     if opts.offload_mode == "python":
@@ -229,62 +237,64 @@ def main():
     elif opts.offload_mode == "cgra":
       custom = custom_cgra()
     else:
-      print("invalid offload mode")
+      trace("invalid offload mode")
       return
 
-#    print("--------------------------- build edge matrix start ----------------------------")
+#    trace("--------------------------- build edge matrix start ----------------------------")
     edgeMatrix = custom.buildEdge(data.edge_index, len(data.x), len(data.x))
-#    print("---------------------------- build edge matrix done ----------------------------")
-    print("-------------------------------- conv1 start -----------------------------------")
-    print("[custom] conv1 mm -- A * (X * W): ")
+#    trace("---------------------------- build edge matrix done ----------------------------")
+    trace("-------------------------------- conv1 start -----------------------------------")
+    trace("[custom] conv1 mm -- A * (X * W): ")
+    start_time = time.time()
     mm = custom.mm(data.x, weight1)
-    # print("..see mm: ")
-    # print(mm)
+    # trace("..see mm: ")
+    # trace(mm)
     mm = custom.mm(edgeMatrix, mm)
     mm = custom.add(mm, bias1)
-    # print("..final: ")
-    print(mm)
-    print("---------------------------------- conv1 done ----------------------------------")
-    print()
-    print("-------------------------- alternative conv1 start -----------------------------")
-    print("[custom] alternative conv1 mm -- (A * X) * W: ")
-    mm = custom.mm(edgeMatrix, data.x)
-    mm = custom.mm(mm, weight1)
-    mm = custom.add(mm, bias1)
-    print(mm)
-    print("--------------------------- alternative conv1 done -----------------------------")
-    print()
-    print("------------------------------- relu start -------------------------------------")
-    print("[custom] custom relu: ")
+    # trace("..final: ")
+    trace(mm)
+    trace("---------------------------------- conv1 done ----------------------------------")
+    trace()
+#    trace("-------------------------- alternative conv1 start -----------------------------")
+#    trace("[custom] alternative conv1 mm -- (A * X) * W: ")
+#    mm = custom.mm(edgeMatrix, data.x)
+#    mm = custom.mm(mm, weight1)
+#    mm = custom.add(mm, bias1)
+#    trace(mm)
+#    trace("--------------------------- alternative conv1 done -----------------------------")
+#    trace()
+    trace("------------------------------- relu start -------------------------------------")
+    trace("[custom] custom relu: ")
     mm = custom.relu(mm);
-    print(mm)
-    print("-------------------------------- relu done -------------------------------------")
-    print()
-    print("------------------------------- conv2 start ------------------------------------")
-    print("[custom] conv2 mm: ")
+    trace(mm)
+    trace("-------------------------------- relu done -------------------------------------")
+    trace()
+    trace("------------------------------- conv2 start ------------------------------------")
+    trace("[custom] conv2 mm: ")
     mm = custom.mm(edgeMatrix, mm)
     mm = custom.mm(mm, weight2)
     mm = custom.add(mm, bias2)
-    print(mm)
-    print("-------------------------------- conv2 done ------------------------------------")
-    print()
+    trace(mm)
+    trace("-------------------------------- conv2 done ------------------------------------")
+    print("*** %s seconds ***" % round(time.time() - start_time, 2))
+    trace()
   
-    print()
+    trace()
     print("============================== GCN geometric ===================================")
-    print()
+    trace()
     model.eval()
     result = model(data)
     _, pred = result.max(dim=1)
 
     # verify the customized output with the golden model
     if verify(mm, result):
-      print("[offload] success!")
+      trace("[offload] success!")
     else:
-      print("[offload] fail!")
+      trace("[offload] fail!")
 
     correct = float (pred[data.test_mask].eq(data.y[data.test_mask]).sum().item())
     acc = correct / data.test_mask.sum().item()
   
-    print('[gold] test GCN and accuracy is: {:.4f}'.format(acc))
+    trace('[gold] test GCN and accuracy is: {:.4f}'.format(acc))
 
 main()
