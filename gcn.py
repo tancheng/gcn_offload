@@ -84,12 +84,12 @@ dataset = Planetoid(root='/tmp/Cora', name='Cora')
 
 class custom_python:
   def mm(self, x, weight):
-  #  out = [[0 for _ in weight[0]] for _ in x]
+    #out = [[0 for _ in weight[0]] for _ in x]
   #  trace("out: ", len(out), len(out[0]))
-  #  for i in range(len(x)):
-  #    for j in range(len(weight[0])):
-  #      for k in range(len(x[0])):
-  #        out[i][j] += x[i][k] * weight[k][j]
+    #for i in range(len(x)):
+    #  for j in range(len(weight[0])):
+    #    for k in range(len(x[0])):
+    #      out[i][j] += x[i][k] * weight[k][j]
     A = np.array(x)
     B = np.array(weight)
     out = A.dot(B)
@@ -156,7 +156,9 @@ class Net(torch.nn.Module):
         trace()
 
         trace("------------------------------- conv1 start ------------------------------------")
+        start_time = time.time()
         x = self.conv1(x, edge_index)
+        print("*** [gold] mm: %s seconds ***" % round(time.time() - start_time, 2))
         trace("[gold] conv1 result ", len(x), " x ", len(x[0]), ": ")
         trace(x)
         trace("-------------------------------- conv1 done ------------------------------------")
@@ -175,7 +177,7 @@ class Net(torch.nn.Module):
         trace("[gold] out (", len(x), "x", len(x[0]), "):")
         trace(x)
         trace("-------------------------------- conv2 done ------------------------------------")
-        print("*** %s seconds ***" % round(time.time() - start_time, 2))
+        print("*** [gold] entire GCN: %s seconds ***" % round(time.time() - start_time, 2))
         trace()
 
         # essential for training
@@ -222,8 +224,8 @@ def main():
     bias1 = model.state_dict()["conv1.bias"]
     weight2 = model.state_dict()["conv2.weight"]
     bias2 = model.state_dict()["conv2.bias"]
-    # trace("[custom] weight1 ", len(model.state_dict()["conv1.weight"].numpy()), " x ", len(model.state_dict()["conv1.weight"][0].numpy()), ": ")
-    # trace(weight1)
+    trace("[custom] weight1 ", len(model.state_dict()["conv1.weight"].numpy()), " x ", len(model.state_dict()["conv1.weight"][0].numpy()), ": ")
+    trace(weight1)
     trace("----------------------------- weight loading done ------------------------------")
     trace()
   
@@ -232,6 +234,8 @@ def main():
       custom = custom_python()
     elif opts.offload_mode == "c++":
       custom = custom_c()
+    elif opts.offload_mode == "mpi":
+      custom = custom_arena()
     elif opts.offload_mode == "arena":
       custom = custom_arena()
     elif opts.offload_mode == "cgra":
@@ -251,6 +255,7 @@ def main():
     # trace(mm)
     mm = custom.mm(edgeMatrix, mm)
     mm = custom.add(mm, bias1)
+    print("*** [custom] mm: %s seconds ***" % round(time.time() - start_time, 2))
     # trace("..final: ")
     trace(mm)
     trace("---------------------------------- conv1 done ----------------------------------")
@@ -276,7 +281,7 @@ def main():
     mm = custom.add(mm, bias2)
     trace(mm)
     trace("-------------------------------- conv2 done ------------------------------------")
-    print("*** %s seconds ***" % round(time.time() - start_time, 2))
+    print("*** [custom] entire GCN: %s seconds ***" % round(time.time() - start_time, 2))
     trace()
   
     trace()
@@ -288,13 +293,13 @@ def main():
 
     # verify the customized output with the golden model
     if verify(mm, result):
-      trace("[offload] success!")
+      print("[offload] success!")
     else:
-      trace("[offload] fail!")
+      print("[offload] fail!")
 
     correct = float (pred[data.test_mask].eq(data.y[data.test_mask]).sum().item())
     acc = correct / data.test_mask.sum().item()
   
-    trace('[gold] test GCN and accuracy is: {:.4f}'.format(acc))
+    print('[gold] test GCN and accuracy is: {:.4f}'.format(acc))
 
 main()
