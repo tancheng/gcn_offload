@@ -1,3 +1,6 @@
+=====================================================================
+Computation w/o data movement:
+---------------------------------------------------------------------
 offloaded C implementation: 5 opt/cycle (2GHz MacOS single softcore)
 pytorch: 50 opt/cycle (2GHz MacOS 16 softcores)
-
+=====================================================================
