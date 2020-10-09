@@ -1,0 +1,1 @@
+clang -mpopcnt -march=core2 -ftree-vectorize -funroll-loops -mtune=haswell -O3 -dynamiclib -o mm.so mm.c

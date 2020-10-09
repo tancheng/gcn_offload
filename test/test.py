@@ -75,12 +75,23 @@ class custom_c:
             suma[inda] = a[i][j]
             inda = inda + 1
     indb = 0
-    for j in range(0, len(b[0])):
-        for i in range(0, len(b)):
+    for i in range(0, len(b)):
+        for j in range(0, len(b[0])):
             sumb[indb] = b[i][j]
             indb = indb + 1
 
-    libmatmult.matmult(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
+    #libmatmult.matmult_1d_c2r_vec(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
+    #libmatmult.matmult_1d_c2r(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
+    #libmatmult.matmult_1d_tile_c2r(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
+    #libmatmult.matmult_1d_tile_c2r_vec(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
+    #libmatmult.matmult_2d(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
+    #libmatmult.matmult_2d_vec(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
+    #libmatmult.matmult_2d_tile(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
+    libmatmult.matmult_2d_c2r(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
+    #libmatmult.matmult_2d_tile_vec(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
+    #libmatmult.matmult_2d_c2r_vec(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
+    #libmatmult.matmult_2d_tile_c2r(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
+    #libmatmult.matmult_2d_tile_c2r_vec(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
 
     res = np.zeros([len(a), len(b[0])])
     indc = 0
@@ -160,8 +171,17 @@ def trace(*info):
 #        return x
 
 def main():
-    a = np.random.normal(size=(800, 800)).astype('float32')
-    b = np.random.normal(size=(800, 800)).astype('float32')
+    a = np.random.normal(size=(1000, 1000)).astype('float32')
+    b = np.random.normal(size=(1000, 1000)).astype('float32')
+#    xx = 0
+#    temp = 1
+#    for i in range(4):
+#      for j in range(4):
+#        a[i][j] = xx
+#        b[i][j] = xx
+#        xx += temp
+#      xx -= temp
+#      temp = -1*temp
     custom = custom_python()
     print("============================== custom python matmul  ===================================")
     start_time = time.time()
