@@ -326,17 +326,19 @@ void ax0_kernel(int start, int k) {
 //  int temp1 = 0;
 //  MPI_Wait(&request_profile, &status_profile);
   for(int i=0; i<num_vertice/NODES; ++i) {
-    float temp0 = out0[i][k];
-    for(int j=0; j<local_bound; ++j) {
-//      temp += local_A[i][start+j] * current_feature[j];
-//      temp0 += local_A[i][start+j] * communicate_buffer[j];
-//      temp0 += local_A[i][start+j] * communicate_buffer[0];
-//      temp0 += local_A[i][0] * communicate_buffer[0];
-//      temp0 += /*local_A[i][start+j]*/ communicate_buffer[j];
-      temp0 += local_A[i][start+j] * communicate_buffer[j];
+//    float temp0 = out0[i][k];
+    float temp0 = 0;
+    float temp1 = 0;
+    float temp2 = 0;
+    float temp3 = 0;
+    for(int j=0; j<local_bound; j+=4) {
+      temp0 += local_A[i][start+j+0] * communicate_buffer[j+0];
+//      temp1 += local_A[i][start+j+1] * communicate_buffer[j+1];
+//      temp2 += local_A[i][start+j+2] * communicate_buffer[j+2];
+//      temp3 += local_A[i][start+j+3] * communicate_buffer[j+3];
 //      cout<<"rank "<<local_rank<<" is processing... local_A["<<i<<"]["<<start+j<<"]: "<<local_A[i][start+j]<<" * comm["<<j<<"]: "<<communicate_buffer[j]<<endl;
     }
-    out0[i][k] = temp0;
+    out0[i][k] = temp0 + temp1 + temp2 + temp3;
 #ifdef DEBUG
     cout<<"[result] rank "<<local_rank<<" out["<<i<<"]["<<k<<"]: "<<out0[i][k]<<endl;
 #endif

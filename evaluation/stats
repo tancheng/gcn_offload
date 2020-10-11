@@ -23,7 +23,7 @@ support, instead, pytorch leverages BLAST that is well optimized.
 =====================================================================
 [2 layer CORA GCN -- (2708 x 2708) x (1433 -> 16 -> 7)] (second)
 single_c2r                       : 9.5
-single_c2r_vec                   : 1.7?
+single_c2r_vec                   : 1.2
 mpi                              :
 
 
