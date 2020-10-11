@@ -80,14 +80,14 @@ class custom_c:
             sumb[indb] = b[i][j]
             indb = indb + 1
 
-    #libmatmult.matmult_1d_c2r_vec(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
+    libmatmult.matmult_1d_c2r_vec(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
     #libmatmult.matmult_1d_c2r(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
     #libmatmult.matmult_1d_tile_c2r(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
     #libmatmult.matmult_1d_tile_c2r_vec(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
     #libmatmult.matmult_2d(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
     #libmatmult.matmult_2d_vec(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
     #libmatmult.matmult_2d_tile(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
-    libmatmult.matmult_2d_c2r(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
+    #libmatmult.matmult_2d_c2r(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
     #libmatmult.matmult_2d_tile_vec(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
     #libmatmult.matmult_2d_c2r_vec(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
     #libmatmult.matmult_2d_tile_c2r(ctypes.byref(suma), ctypes.byref(sumb), ctypes.byref(sumc), len(a), len(b[0]), len(b));
@@ -171,8 +171,8 @@ def trace(*info):
 #        return x
 
 def main():
-    a = np.random.normal(size=(1000, 1000)).astype('float32')
-    b = np.random.normal(size=(1000, 1000)).astype('float32')
+    a = np.random.normal(size=(2700, 2700)).astype('float32')
+    b = np.random.normal(size=(2700, 1400)).astype('float32')
 #    xx = 0
 #    temp = 1
 #    for i in range(4):

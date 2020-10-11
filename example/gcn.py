@@ -177,7 +177,7 @@ class Net(torch.nn.Module):
         trace("[gold] out (", len(x), "x", len(x[0]), "):")
         trace(x)
         trace("-------------------------------- conv2 done ------------------------------------")
-        print("*** [gold] entire GCN: %s seconds ***" % round(time.time() - start_time, 2))
+        print("*** [gold] entire GCN: %s seconds ***" % round(time.time() - start_time, 4))
         trace()
 
         # essential for training
@@ -298,27 +298,32 @@ def main():
     for input_b2_out in temp_b2:
       f.write(str(input_b2_out) + "\n")
 
-    trace("-------------------------------- conv1 start -----------------------------------")
-    trace("[custom] conv1 mm -- A * (X * W): ")
-    start_time = time.time()
-    mm = custom.mm(data.x, weight1)
-    # trace("..see mm: ")
-    # trace(mm)
-    mm = custom.mm(edgeMatrix, mm)
-    mm = custom.add(mm, bias1)
-    print("*** [custom] mm: %s seconds ***" % round(time.time() - start_time, 2))
-    # trace("..final: ")
-    trace(mm)
-    trace("---------------------------------- conv1 done ----------------------------------")
-    trace()
-#    trace("-------------------------- alternative conv1 start -----------------------------")
-#    trace("[custom] alternative conv1 mm -- (A * X) * W: ")
-#    mm = custom.mm(edgeMatrix, data.x)
-#    mm = custom.mm(mm, weight1)
+
+#    trace("-------------------------------- conv1 start -----------------------------------")
+#    trace("[custom] conv1 mm -- A * (X * W): ")
+#    start_time = time.time()
+#    mm = custom.mm(data.x, weight1)
+#    # trace("..see mm: ")
+#    # trace(mm)
+#    mm = custom.mm(edgeMatrix, mm)
 #    mm = custom.add(mm, bias1)
+#    print("*** [custom] mm: %s seconds ***" % round(time.time() - start_time, 2))
+#    # trace("..final: ")
 #    trace(mm)
-#    trace("--------------------------- alternative conv1 done -----------------------------")
+#    trace("---------------------------------- conv1 done ----------------------------------")
 #    trace()
+    trace("-------------------------- alternative conv1 start -----------------------------")
+    trace("[custom] alternative conv1 mm -- (A * X) * W: ")
+    start_time = time.time()
+    mm = custom.mm(edgeMatrix, data.x)
+    trace("--------------------------- alternative conv1 (ax) done -----------------------------")
+    mm = custom.mm(mm, weight1)
+    trace(mm)
+    trace()
+    trace("--------------------------- alternative conv1 (mw) done -----------------------------")
+    mm = custom.add(mm, bias1)
+    trace(mm)
+    trace()
     trace("------------------------------- relu start -------------------------------------")
     trace("[custom] custom relu: ")
     mm = custom.relu(mm);
@@ -345,6 +350,11 @@ def main():
     # verify the customized output with the golden model
     if verify(mm, result):
       print("[offload] success!")
+      f = open('output_gold', 'w')
+      for rows in mm:
+        for c in rows:
+          f.write(str(c) + "\n")
+
     else:
       print("[offload] fail!")
 
