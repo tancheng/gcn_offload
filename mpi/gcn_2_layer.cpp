@@ -15,6 +15,12 @@
 #include <string>
 
 //#define DEBUG
+// Note that the vectorization version works for single core sequential
+// implementation, instead of multiple-node MPI version, which is due
+// to the number of nodes in the graph is not dividable by 8.
+//#define VECTORIZATION
+//#define DUMMY_DATA
+
 
 //#define num_vertice 2708
 //#define num_feature 1433
@@ -27,8 +33,8 @@
 //#define num_w1_out 7
 
 //#define num_vertice 8000
-#define NODES 1
-//#define NODES 4
+//#define NODES 1
+#define NODES 4
 //#define NODES 8
 //#define NODES 16
 
@@ -77,6 +83,73 @@ float** out3;
 
 void init_data() {
 
+#ifdef DUMMY_DATA
+  num_vertice = 4;
+  global_A = new int*[num_vertice];
+  for(int i=0; i<num_vertice; ++i) {
+    global_A[i] = new int[num_vertice];
+    for(int j=0; j<num_vertice; ++j) {
+      global_A[i][j] = 0;
+    }
+  }
+  for(int i=0; i<num_vertice; ++i) {
+    for(int j=i; j<num_vertice; ++j) {
+      global_A[i][j] = j%2;
+      global_A[j][i] = j%2;
+    }
+  }
+
+  num_feature = 4;
+
+  global_X = new float*[num_vertice];
+  for(int i=0; i<num_vertice; ++i) {
+    global_X[i] = new float[num_feature];
+    for(int j=0; j<num_feature; ++j) {
+      global_X[i][j] = i*num_feature + j;
+    }
+  }
+
+  num_w0_out = 2;
+
+  global_weight0 = new float*[num_feature];
+  for(int i=0; i<num_feature; ++i) {
+    global_weight0[i] = new float[num_w0_out];
+    for(int j=0; j<num_w0_out; ++j) {
+      global_weight0[i][j] = i;
+    }
+  }
+
+  global_bias0 = new float[num_w0_out];
+  for(int i=0; i<num_w0_out; ++i) {
+    global_bias0[i] = 0;
+  }
+
+  num_w1_out = 1;
+
+  global_weight1 = new float*[num_w0_out];
+  for(int i=0; i<num_w0_out; ++i) {
+    global_weight1[i] = new float[num_w1_out];
+    for(int j=0; j<num_w1_out; ++j) {
+      global_weight1[i][j] = i*num_w1_out + j;
+    }
+  }
+
+  global_bias1 = new float[num_w1_out];
+  for(int i=0; i<num_w1_out; ++i) {
+    global_bias1[i] = 0;
+  }
+
+  output_gold = new float*[num_vertice];
+  for(int i=0; i<num_vertice; ++i) {
+    output_gold[i] = new float[num_w1_out];
+  }
+  output_gold[0][0] = 338;
+  output_gold[1][0] = 462;
+  output_gold[2][0] = 200;
+  output_gold[3][0] = 548;
+
+#endif
+#ifndef DUMMY_DATA
   // read data from files and initialize input data arrays
   ifstream File;
   File.open("../data/cora_2layer/input_a");
@@ -147,6 +220,8 @@ void init_data() {
     }
   }
   File.close();
+
+#endif
 
   local_bound = num_vertice/NODES;
 //  vertices = new int[num_vertice + 1];
@@ -234,9 +309,11 @@ void init_data() {
 }
 
 bool verify(float** a, float** b) {
+  int base = local_rank*(num_vertice/NODES);
   for(int i=local_rank*(num_vertice/NODES); i<(local_rank+1)*(num_vertice/NODES); ++i) {
     for(int j=0; j<num_w1_out; ++j) {
-      if(abs(a[i][j] - b[i][j]) > 0.001) {
+      if(abs(a[i-base][j] - b[i][j]) > 0.001) {
+        cout<<"rank: "<<local_rank<<" local_out["<<i-base<<"]["<<j<<"]: "<<a[i-base][j]<<"; gold["<<i<<"]["<<j<<"]: "<<b[i][j]<<endl;
         return false;
       }
     }
@@ -245,7 +322,7 @@ bool verify(float** a, float** b) {
 }
 
 void display_input() {
-  if(local_rank == NODES-1) {
+//  if(local_rank == NODES-1) {
     cout<<"[init A] rank "<<local_rank<<" : "<<endl;
     for(int i=0; i<num_vertice/NODES; ++i) {
       cout<<"[ ";
@@ -294,11 +371,11 @@ void display_input() {
       cout<<global_bias1[j]<<" ";
     }
     cout<<" ]"<<endl;
-  }
+//  }
 }
 
 void display_output() {
-  if(local_rank == NODES-1) {
+//  if(local_rank == NODES-1) {
     cout<<"[output out0] rank "<<local_rank<<" : "<<endl;
     for(int i=0; i<num_vertice/NODES; ++i) {
       cout<<"[ ";
@@ -315,7 +392,7 @@ void display_output() {
       }
       cout<<" ]"<<endl;
     }
-  }
+//  }
 }
  
 // ----------------------------------------------------------------------
@@ -331,14 +408,23 @@ void ax0_kernel(int start, int k) {
     float temp1 = 0;
     float temp2 = 0;
     float temp3 = 0;
+// note that the vectorization version works for single core sequential
+// implementation, instead of multiple-node MPI version
+#ifdef VECTORIZATION
     for(int j=0; j<local_bound; j+=4) {
       temp0 += local_A[i][start+j+0] * communicate_buffer[j+0];
-//      temp1 += local_A[i][start+j+1] * communicate_buffer[j+1];
-//      temp2 += local_A[i][start+j+2] * communicate_buffer[j+2];
-//      temp3 += local_A[i][start+j+3] * communicate_buffer[j+3];
+      temp1 += local_A[i][start+j+1] * communicate_buffer[j+1];
+      temp2 += local_A[i][start+j+2] * communicate_buffer[j+2];
+      temp3 += local_A[i][start+j+3] * communicate_buffer[j+3];
+    }
+#endif
+#ifndef VECTORIZATION
+    for(int j=0; j<local_bound; j++) {
+      temp0 += local_A[i][start+j] * communicate_buffer[j];
 //      cout<<"rank "<<local_rank<<" is processing... local_A["<<i<<"]["<<start+j<<"]: "<<local_A[i][start+j]<<" * comm["<<j<<"]: "<<communicate_buffer[j]<<endl;
     }
-    out0[i][k] = temp0 + temp1 + temp2 + temp3;
+#endif
+    out0[i][k] += temp0 + temp1 + temp2 + temp3;
 #ifdef DEBUG
     cout<<"[result] rank "<<local_rank<<" out["<<i<<"]["<<k<<"]: "<<out0[i][k]<<endl;
 #endif
@@ -399,7 +485,7 @@ void init_task(int argc, char *argv[]) {
   global_start = 0;
 
   init_data();
-  //display_input();
+//  display_input();
 }
 
 // ----------------------------------------------------------------------
@@ -440,7 +526,6 @@ int main(int argc, char *argv[]) {
     MPI_Barrier(MPI_COMM_WORLD);
   }
 
-  chrono::system_clock::time_point end = chrono::system_clock::now();
   // Layer 1 -- M = M x Weight + bias
   mw0_kernel();
 
@@ -463,15 +548,16 @@ int main(int argc, char *argv[]) {
     }
     MPI_Barrier(MPI_COMM_WORLD);
   }
-
   // Layer 2 -- M = M x Weight + bias
   mw1_kernel();
+
+  chrono::system_clock::time_point end = chrono::system_clock::now();
 
   if(verify(out3, output_gold)) {
     cout<<"success~"<<endl;
   } else {
     cout<<"fail.."<<endl;
-    // display_output();
+    display_output();
   }
 
   if(local_rank == NODES-1) {
