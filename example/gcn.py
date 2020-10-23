@@ -152,6 +152,8 @@ class Net(torch.nn.Module):
         x, edge_index = data.x, data.edge_index
         trace("[gold] feature ", len(x), " x ", len(x[0]), ": ")
         trace(x)
+        trace("[gold] edge: ")
+        trace(data.edge_index)
         trace("-------------------------------- init done -------------------------------------")
         trace()
 

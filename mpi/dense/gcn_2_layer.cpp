@@ -18,7 +18,7 @@
 // Note that the vectorization version works for single core sequential
 // implementation, instead of multiple-node MPI version, which is due
 // to the number of nodes in the graph is not dividable by 8.
-//#define VECTORIZATION
+#define VECTORIZATION
 //#define DUMMY_DATA
 
 
@@ -152,7 +152,7 @@ void init_data() {
 #ifndef DUMMY_DATA
   // read data from files and initialize input data arrays
   ifstream File;
-  File.open("../data/cora_2layer/input_a");
+  File.open("../../data/cora_2layer/input_a");
   File >> num_vertice;
 
   global_A = new int*[num_vertice];
@@ -164,7 +164,7 @@ void init_data() {
   }
   File.close();
 
-  File.open("../data/cora_2layer/input_x");
+  File.open("../../data/cora_2layer/input_x");
   File >> num_feature;
 
   global_X = new float*[num_vertice];
@@ -176,7 +176,7 @@ void init_data() {
   }
   File.close();
 
-  File.open("../data/cora_2layer/input_w0");
+  File.open("../../data/cora_2layer/input_w0");
   File >> num_w0_out;
 
   global_weight0 = new float*[num_feature];
@@ -193,7 +193,7 @@ void init_data() {
   }
   File.close();
 
-  File.open("../data/cora_2layer/input_w1");
+  File.open("../../data/cora_2layer/input_w1");
   File >> num_w1_out;
 
   global_weight1 = new float*[num_w0_out];
@@ -210,7 +210,7 @@ void init_data() {
   }
   File.close();
 
-  File.open("../data/cora_2layer/output_gold");
+  File.open("../../data/cora_2layer/output_gold");
 
   output_gold = new float*[num_vertice];
   for(int i=0; i<num_vertice; ++i) {

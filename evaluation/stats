@@ -22,9 +22,12 @@ manully coded in assembly and probably without efficient SIMD
 support, instead, pytorch leverages BLAST that is well optimized.
 =====================================================================
 [2 layer CORA GCN -- (2708 x 2708) x (1433 -> 16 -> 7)] (second)
-single_c2r                       : 9.9
-single_c2r_4vec                  : 3.7
-mpi_c2r_4vec                     : 1.7
+dense_single_c2r                 : 9.9
+dense_single_c2r_4vec            : 3.7
+dense_mpi_c2r_4vec               : 1.7
+
+sparse_single_csr                : 0.22
+sparse_mpi_csr                   : 0.08
 
 
 pytorch (all CPUs)               : 0.05
