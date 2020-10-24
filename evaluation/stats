@@ -26,8 +26,10 @@ dense_single_c2r                 : 9.9
 dense_single_c2r_4vec            : 3.7
 dense_mpi_c2r_4vec               : 1.7
 
-sparse_single_csr                : 0.22
-sparse_mpi_csr                   : 0.08
+sparse_single_csr (first layer)  : 0.22
+sparse_single_csr (both layer)   : 0.11
+sparse_mpi_csr (first layer)     : 0.08
+sparse_mpi_csr (both layer)      : 0.04
 
 
 pytorch (all CPUs)               : 0.05
