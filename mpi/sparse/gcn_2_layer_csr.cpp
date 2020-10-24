@@ -55,10 +55,6 @@ int flag_profile;
 MPI_Request request_profile = MPI_REQUEST_NULL;
 MPI_Status  status_profile;
 
-// ----------------------------------------------------------------------
-// Local data allocated onto a node.
-// TODO: user specified.
-// ----------------------------------------------------------------------
 int num_vertice;
 int num_nonzero_A = 0;
 int num_feature;
@@ -73,15 +69,6 @@ float** global_weight1;
 float* global_bias1;
 float** output_gold;
 
-//int* global_V; // = {5,8,3,6};
-//int* global_COL[SIZE]; // = {0,1,2,1};
-//int* global_ROW[TOTAL+1]; // = {0,0,2,3,4};
-//float* global_result[TOTAL];
-
-// ----------------------------------------------------------------------
-// Local data allocated onto a node.
-// TODO: user specified.
-// ----------------------------------------------------------------------
 int local_nnz;
 float* local_V;
 int* local_COL;
@@ -243,53 +230,7 @@ void init_data() {
 
 #endif
 
-//  global_V = new float[num_nonzero_A];
-//
-//  global_COL = new int[num_nonzero_A];
-//  global_ROW = new int[num_vertice+1]; // = {0,0,2,3,4};
-//
-//  int k=0;
-//  global_ROW[0] = 0;
-//  for(int i=0; i<num_vertice; ++i) {
-//    for(int j=0; j<num_vertice; ++j) {
-//      if(global_A[i][j] != 0) {
-//        global_V[k] = global_A[i][j];
-//        global_COL[k] = j;
-//        k++;
-//      }
-//    }
-//    global_ROW[i+1] = k;
-//  }
-
   local_bound = num_vertice/NODES;
-//  vertices = new int[num_vertice + 1];
-//  visited = new int[num_vertice];
-//  string line;
-//  std::string::size_type sz;   // alias of size_t
-//  for(int i=0; i<num_vertice; ++i) {
-//    File >> line;
-//    vertices[i] = stoi(line, &sz);
-//    visited[i] = num_vertice+1;
-//    File >> line;
-//  }
-//
-//  File >> line;
-//  global_start = std::stoi(line, &sz);
-//
-//  File >> num_edge;
-//  vertices[num_vertice] = num_edge;
-//  edges = new int[num_edge];
-//  for(int i=0; i<num_edge; ++i) {
-//    File >> line;
-//    edges[i] = stoi(line, &sz);
-//    File >> line;
-//  }
-//
-//  for(int i=0; i<SIZE; ++i) {
-//    for(int j=vertices[i]; j<vertices[i+1]; ++j) {
-//      GRAPH[i][edges[j]] = SIZE;
-//    }
-//  }
 
   local_A = new float*[num_vertice/NODES];
   local_X = new float*[num_vertice/NODES];
@@ -336,13 +277,6 @@ void init_data() {
   communicate_buffer = new float[num_vertice];
   temp_communicate_buffer = new float[num_vertice];
   current_feature = new float[num_vertice/NODES];
-//  x = new int[num_vertice/NODES];
-//  for(int i=0; i<num_vertice/NODES; ++i) {
-//    x[i] = i+local_rank*local_bound;
-//    for(int j=0; j<num_vertice; ++j) {
-//      x[i][j] = i+j;
-//    }
-//  }
   out0 = new float*[num_vertice/NODES];
   for(int i=0; i<num_vertice/NODES; ++i) {
     out0[i] = new float[num_feature];
@@ -468,59 +402,10 @@ void display_output() {
 // Note that there are three params and one return.
 // ----------------------------------------------------------------------
 void ax0_spmv_kernel(int start, int f) {
-//void ax0_spmv_kernel(int start, int end) {
-//  for(int i=0; i<end-start; ++i) {
-//    int result_index = 0;
   for(int i=0; i<num_vertice/NODES; ++i) {
-
-//    for(int j=0; j<num_vertice; ++j) {
       for(int k=local_ROW[i]; k<local_ROW[i+1]; ++k) {
-//        cout<<"rank "<<local_rank<<" local_V["<<k<<"]: "<<local_V[k]<<"; local_COL["<<k<<"]: "<<local_COL[k]<<"; communicate_buffer[?]: "<<communicate_buffer[local_COL[k]]<<endl;
         out0[i][f] += local_V[k] * communicate_buffer[local_COL[k]]; 
       }
-//    }
-
-//    for(int j=1; j<TOTAL+1; ++j) {
-//      if(i+start < global_ROW[j]) {
-//        result_index = j-1;
-//        break;
-//      }
-//    }
-//    local_OUT[result_index] += local_V[i] * local_X[local_COL[i]];
-
-  }
-  MPI_Test(&request_profile, &flag_profile, &status_profile);
-}
-
-void ax0_kernel(int start, int k) {
-//  int temp1 = 0;
-//  MPI_Wait(&request_profile, &status_profile);
-  for(int i=0; i<num_vertice/NODES; ++i) {
-//    float temp0 = out0[i][k];
-    float temp0 = 0;
-    float temp1 = 0;
-    float temp2 = 0;
-    float temp3 = 0;
-// note that the vectorization version works for single core sequential
-// implementation, instead of multiple-node MPI version
-#ifdef VECTORIZATION
-    for(int j=0; j<local_bound; j+=4) {
-      temp0 += local_A[i][start+j+0] * communicate_buffer[j+0];
-      temp1 += local_A[i][start+j+1] * communicate_buffer[j+1];
-      temp2 += local_A[i][start+j+2] * communicate_buffer[j+2];
-      temp3 += local_A[i][start+j+3] * communicate_buffer[j+3];
-    }
-#endif
-#ifndef VECTORIZATION
-    for(int j=0; j<local_bound; j++) {
-      temp0 += local_A[i][start+j] * communicate_buffer[j];
-//      cout<<"rank "<<local_rank<<" is processing... local_A["<<i<<"]["<<start+j<<"]: "<<local_A[i][start+j]<<" * comm["<<j<<"]: "<<communicate_buffer[j]<<endl;
-    }
-#endif
-    out0[i][k] += temp0 + temp1 + temp2 + temp3;
-#ifdef DEBUG
-    cout<<"[result] rank "<<local_rank<<" out["<<i<<"]["<<k<<"]: "<<out0[i][k]<<endl;
-#endif
   }
   MPI_Test(&request_profile, &flag_profile, &status_profile);
 }
@@ -546,22 +431,6 @@ void ax1_spmv_kernel(int start, int f) {
 //      cout<<"rank "<<local_rank<<" local_V["<<k<<"]: "<<local_V[k]<<"; local_COL["<<k<<"]: "<<local_COL[k]<<"; communicate_buffer[?]: "<<communicate_buffer[local_COL[k]]<<endl;
       out2[i][f] += local_V[k] * communicate_buffer[local_COL[k]]; 
     }
-  }
-  MPI_Test(&request_profile, &flag_profile, &status_profile);
-}
-
-void ax1_kernel(int start, int k) {
-//  MPI_Wait(&request_profile, &status_profile);
-  for(int i=0; i<num_vertice/NODES; ++i) {
-    temp = out2[i][k];
-    for(int j=0; j<local_bound; ++j) {
-      temp += local_A[i][start+j] * current_feature[j];
-//      cout<<"rank "<<local_rank<<" is processing... out["<<i<<"]: "<<out[i]<<" = local_A["<<i<<"]["<<start+j<<"]: "<<local_A[i][start+j]<<" * local_temp["<<j<<"]: "<<local_temp[j]<<endl;
-#ifdef DEBUG
-      cout<<"[result] rank "<<local_rank<<" out["<<i<<"]["<<k<<"]: "<<out0[i][k]<<endl;
-#endif
-    }
-    out2[i][k] = temp;
   }
   MPI_Test(&request_profile, &flag_profile, &status_profile);
 }
@@ -607,27 +476,13 @@ int main(int argc, char *argv[]) {
   // Execution
   // Layer 1 -- M = A x X:
   for(int k=0; k<num_feature; ++k) {
-//    for(int i=0; i<NODES; ++i) {
-      for(int j=0; j<num_vertice/NODES; ++j) {
-        temp_communicate_buffer[local_rank*local_bound+j] = local_X[j][k];
-//        cout<<"rank "<<local_rank<<" trying to fill buffer "<<local_X[j][k]<<endl;
-      }
-      MPI_Allreduce(temp_communicate_buffer, communicate_buffer, num_vertice, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
-//      for(int j=0; j<num_vertice/NODES; ++j) {
-//        current_feature[j] = communicate_buffer[j];
-//      }
-  //    cout<<"[bcast] rank "<<local_rank<<" in time "<<i<<endl;
-  //    for(int x=0; x<num_vertice/NODES; ++x) {
-  //      cout<<local_temp[x]<<" ";
-  //    }
-  //    cout<<endl;
-//      if(i == local_rank) {
-        total_data_out += num_vertice;
-//      }
-      total_data_in += num_vertice;
-//      ax0_kernel(i*local_bound, k);
-      ax0_spmv_kernel(local_rank*local_bound, k);
-//    }
+    for(int j=0; j<num_vertice/NODES; ++j) {
+      temp_communicate_buffer[local_rank*local_bound+j] = local_X[j][k];
+    }
+    MPI_Allreduce(temp_communicate_buffer, communicate_buffer, num_vertice, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
+    total_data_out += num_vertice;
+    total_data_in += num_vertice;
+    ax0_spmv_kernel(local_rank*local_bound, k);
     MPI_Barrier(MPI_COMM_WORLD);
   }
 
@@ -636,23 +491,13 @@ int main(int argc, char *argv[]) {
 
   // Layer 2 -- M = A x M:
   for(int k=0; k<num_w0_out; ++k) {
-//    for(int i=0; i<NODES; ++i) {
-      for(int j=0; j<num_vertice/NODES; ++j) {
-//        communicate_buffer[j] = out1[j][k];
-        temp_communicate_buffer[local_rank*local_bound+j] = out1[j][k];
-      }
-      MPI_Allreduce(temp_communicate_buffer, communicate_buffer, num_vertice, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
-//      MPI_Bcast(communicate_buffer, num_vertice/NODES, MPI_FLOAT, i, MPI_COMM_WORLD);
-//      for(int j=0; j<num_vertice/NODES; ++j) {
-//        current_feature[j] = communicate_buffer[j];
-//      }
-//      if(i == local_rank) {
-        total_data_out += num_vertice;
-//      } else {
-        total_data_in += num_vertice;
-//      }
-      ax1_spmv_kernel(local_rank*local_bound, k);
-//    }
+    for(int j=0; j<num_vertice/NODES; ++j) {
+      temp_communicate_buffer[local_rank*local_bound+j] = out1[j][k];
+    }
+    MPI_Allreduce(temp_communicate_buffer, communicate_buffer, num_vertice, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
+    total_data_out += num_vertice;
+    total_data_in += num_vertice;
+    ax1_spmv_kernel(local_rank*local_bound, k);
     MPI_Barrier(MPI_COMM_WORLD);
   }
   // Layer 2 -- M = M x Weight + bias
@@ -672,9 +517,6 @@ int main(int argc, char *argv[]) {
     for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
       cout<<"[ ";
       for(int j=num_feature-1; j<num_feature; ++j) {
-//    for(int i=0; i<num_vertice/NODES; ++i) {
-//      cout<<"[ ";
-//      for(int j=0; j<num_feature; ++j) {
         cout<<out0[i][j]<<" ";
       }
       cout<<" ]"<<endl;
@@ -684,9 +526,6 @@ int main(int argc, char *argv[]) {
     for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
       cout<<"[ ";
       for(int j=num_w0_out-1; j<num_w0_out; ++j) {
-//    for(int i=0; i<num_vertice/NODES; ++i) {
-//      cout<<"[ ";
-//      for(int j=0; j<num_w0_out; ++j) {
         cout<<out1[i][j]<<" ";
       }
       cout<<" ]"<<endl;
@@ -696,21 +535,14 @@ int main(int argc, char *argv[]) {
     for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
       cout<<"[ ";
       for(int j=num_w0_out-1; j<num_w0_out; ++j) {
-//    for(int i=0; i<num_vertice/NODES; ++i) {
-//      cout<<"[ ";
-//      for(int j=0; j<num_w0_out; ++j) {
         cout<<out2[i][j]<<" ";
       }
       cout<<" ]"<<endl;
     }
   
     cout<<"[final] rank "<<local_rank<<" out3: ";
-//    for(int i=0; i<num_vertice/NODES; ++i) {
-//      cout<<"[ ";
-//      for(int j=0; j<num_w1_out; ++j) {
     for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
       cout<<"[ ";
-//      for(int j=num_w1_out-1; j<num_w1_out; ++j) {
       for(int j=0; j<num_w1_out; ++j) {
         cout<<out3[i][j]<<" ";
       }
