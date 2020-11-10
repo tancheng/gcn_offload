@@ -22,20 +22,20 @@ manully coded in assembly and probably without efficient SIMD
 support, instead, pytorch leverages BLAST that is well optimized.
 =====================================================================
 [2 layer CORA GCN -- (2708 x 2708) x (1433 -> 16 -> 7)] (second)
-dense_single_c2r                 : 9.9
-dense_single_c2r_4vec            : 3.7
-dense_mpi_c2r_4vec               : 1.7
+dense_single_c2r                     : 9.9
+dense_single_c2r_4vec                : 3.7
+dense_mpi_c2r_4vec                   : 1.7
 
-sparse_single_csr (first layer)  : 0.22
-sparse_single_csr (both layer)   : 0.11
-sparse_mpi_csr (first layer)     : 0.08
-sparse_mpi_csr (both layer)      : 0.04
+sparse_single_csr (acc first layer)  : 0.22
+sparse_single_csr (acc both layer)   : 0.11
+sparse_mpi_csr (acc first layer)     : 0.08
+sparse_mpi_csr (acc both layer)      : 0.04
 
 
-pytorch (all CPUs)               : 0.05
-pytorch (single CPU)             : 0.2
-pytorch_geometric (all CPUs)     : 0.01
-pytorch_geometric (single CPU)   : 0.01 (no change)
+pytorch (all CPUs)                   : 0.05
+pytorch (single CPU)                 : 0.2
+pytorch_geometric (all CPUs)         : 0.01
+pytorch_geometric (single CPU)       : 0.01 (no change)
 
 This is also comparable and reasonable enough. Pytorch_geometric
 performs better since it leverages other optimization techniques,
