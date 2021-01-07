@@ -18,7 +18,7 @@
 // Note that the vectorization version works for single core sequential
 // implementation, instead of multiple-node MPI version, which is due
 // to the number of nodes in the graph is not dividable by 8.
-#define VECTORIZATION
+//#define VECTORIZATION
 //#define DUMMY_DATA
 
 
