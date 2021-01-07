@@ -84,7 +84,11 @@ float** out3;
 void init_data() {
 
 #ifdef DUMMY_DATA
-  num_vertice = 4;
+  num_vertice = 20;
+  num_feature = 10;
+  num_w0_out = 4;
+  num_w1_out = 2;
+
   global_A = new int*[num_vertice];
   for(int i=0; i<num_vertice; ++i) {
     global_A[i] = new int[num_vertice];
@@ -99,8 +103,6 @@ void init_data() {
     }
   }
 
-  num_feature = 4;
-
   global_X = new float*[num_vertice];
   for(int i=0; i<num_vertice; ++i) {
     global_X[i] = new float[num_feature];
@@ -109,7 +111,6 @@ void init_data() {
     }
   }
 
-  num_w0_out = 2;
 
   global_weight0 = new float*[num_feature];
   for(int i=0; i<num_feature; ++i) {
@@ -123,8 +124,6 @@ void init_data() {
   for(int i=0; i<num_w0_out; ++i) {
     global_bias0[i] = 0;
   }
-
-  num_w1_out = 1;
 
   global_weight1 = new float*[num_w0_out];
   for(int i=0; i<num_w0_out; ++i) {
@@ -553,11 +552,12 @@ int main(int argc, char *argv[]) {
 
   chrono::system_clock::time_point end = chrono::system_clock::now();
 
+  // Verify
   if(verify(out3, output_gold)) {
-    cout<<"success~"<<endl;
+    cout<<"rank "<<local_rank<<" success~"<<endl;
   } else {
-    cout<<"fail.."<<endl;
-    display_output();
+    cout<<"rank "<<local_rank<<" fail.."<<endl;
+    //display_output();
   }
 
   if(local_rank == NODES-1) {
