@@ -80,7 +80,7 @@ long int ARENA_total_task_in        = 0;
 long int ARENA_total_task_out       = 0;
 map<int, int (*)(int, int, int)> ARENA_kernel_map;
 
-char buf[100000];
+char buf[60000000];
 struct  ARENA_tag_struct {
   int id;
   int start;
@@ -268,7 +268,7 @@ inline void ARENA_init_param() {
     ARENA_recv_list.push(recv_tag);
   }
 
-  MPI_Buffer_attach(buf, 100000);
+  MPI_Buffer_attach(buf, 60000000);
 
   // Init flags
   ARENA_skip_recv = false;
@@ -351,7 +351,7 @@ inline int ARENA_task_arrive() {
       ARENA_send_list.push(temp_tag);
     } else if(ARENA_terminate_count <= 0 and ARENA_send_list.empty()) {
       ARENA_total_task_out += 1;
-      MPI_Isend(ARENA_tag, ARENA_TAG_SIZE, MPI_FLOAT, (ARENA_local_rank+1)%ARENA_nodes, 0, MPI_COMM_WORLD, &request_task);
+      MPI_Ibsend(ARENA_tag, ARENA_TAG_SIZE, MPI_FLOAT, (ARENA_local_rank+1)%ARENA_nodes, 0, MPI_COMM_WORLD, &request_task);
 #ifdef DEBUG
       cout<<"[bypass and terminate] rank "<<ARENA_local_rank<<endl;
 #endif
@@ -536,7 +536,8 @@ inline void ARENA_data_value_send() {
         ARENA_load_data(ARENA_remote_ask_start[i], ARENA_remote_ask_end[i], ARENA_remote_ask_buff[i]);
         ARENA_total_data_out += length;
         //MPI_Send(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value);//, &request_data_value);
-        MPI_Isend(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value, &request_data_value);
+        MPI_Ibsend(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value, &request_data_value);
+        //MPI_Wait(&request_task, &status);
 #ifdef DEBUG
         cout<<"[isent data] rank "<<ARENA_local_rank<<" to "<<i<<" with length "<<length<<endl;
 #endif
@@ -630,7 +631,7 @@ inline void ARENA_send_task_tag() {
   #ifdef DEBUG
     cout<<"[sent] rank "<<ARENA_local_rank<<" start "<<ARENA_tag[ARENA_TAG_START]<<" end "<<ARENA_tag[ARENA_TAG_END]<<" param "<<ARENA_tag[ARENA_TAG_PARAM]<<endl;
   #endif
-    MPI_Wait(&request_task, &status);
+    //MPI_Wait(&request_task, &status);
   }
 }
 
