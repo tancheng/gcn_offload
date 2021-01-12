@@ -1,6 +1,6 @@
-// =======================================================================
+// ======================================================================
 // gcn_2_layer_csr.cpp
-// =======================================================================
+// ======================================================================
 // Single layer GCN's Ax implementation, which can be viewed as GEMV.
 // Note that the entire implementation of single layer GCN is FC(Ax, W).
 //
@@ -19,7 +19,7 @@
 // implementation, instead of multiple-node MPI version, which is due
 // to the number of nodes in the graph is not dividable by 8.
 //#define VECTORIZATION
-//#define DUMMY_DATA
+#define DUMMY_DATA
 
 
 //#define num_vertice 2708
@@ -73,7 +73,6 @@ int local_nnz;
 float* local_V;
 int* local_COL;
 int* local_ROW;
-float* local_OUT;
 
 float** local_X;
 float* communicate_buffer;
@@ -87,7 +86,7 @@ float** out3;
 void init_data() {
 
 #ifdef DUMMY_DATA
-  num_vertice = 4;
+  num_vertice = 8;
   global_A = new int*[num_vertice];
   for(int i=0; i<num_vertice; ++i) {
     global_A[i] = new int[num_vertice];
@@ -374,6 +373,27 @@ void display_input() {
     }
     cout<<" ]"<<endl;
 //  }
+
+    cout<<"[init csr local_V] rank "<<local_rank<<" : "<<endl;
+    cout<<"[ ";
+    for(int i=0; i<local_nnz; ++i) {
+      cout<<local_V[i]<<" ";
+    }
+    cout<<" ]"<<endl;
+
+    cout<<"[init csr local_COL] rank "<<local_rank<<" : "<<endl;
+    cout<<"[ ";
+    for(int i=0; i<local_nnz; ++i) {
+      cout<<local_COL[i]<<" ";
+    }
+    cout<<" ]"<<endl;
+
+    cout<<"[init csr local_ROW] rank "<<local_rank<<" : "<<endl;
+    cout<<"[ ";
+    for(int i=0; i<local_bound+1; ++i) {
+      cout<<local_ROW[i]<<" ";
+    }
+    cout<<" ]"<<endl;
 }
 
 void display_output() {
@@ -457,7 +477,7 @@ void init_task(int argc, char *argv[]) {
   global_start = 0;
 
   init_data();
-//  display_input();
+  display_input();
 }
 
 // ----------------------------------------------------------------------
@@ -475,6 +495,7 @@ int main(int argc, char *argv[]) {
 
   // Execution
   // Layer 1 -- M = A x X:
+  memset(temp_communicate_buffer, 0, sizeof(float)*num_vertice);
   for(int k=0; k<num_feature; ++k) {
     for(int j=0; j<num_vertice/NODES; ++j) {
       temp_communicate_buffer[local_rank*local_bound+j] = local_X[j][k];
@@ -490,6 +511,7 @@ int main(int argc, char *argv[]) {
   mw0_kernel();
 
   // Layer 2 -- M = A x M:
+  memset(temp_communicate_buffer, 0, sizeof(float)*num_vertice);
   for(int k=0; k<num_w0_out; ++k) {
     for(int j=0; j<num_vertice/NODES; ++j) {
       temp_communicate_buffer[local_rank*local_bound+j] = out1[j][k];
@@ -509,39 +531,46 @@ int main(int argc, char *argv[]) {
     cout<<"success~"<<endl;
   } else {
     cout<<"fail.."<<endl;
-    display_output();
+//    display_output();
   }
 
-  if(local_rank == NODES-1) {
+  if(local_rank != NODES) {
     cout<<"[final] rank "<<local_rank<<" out0: "<<endl;
-    for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
+    for(int i=0; i<num_vertice/NODES; ++i) {
+    //for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
       cout<<"[ ";
-      for(int j=num_feature-1; j<num_feature; ++j) {
+      for(int j=0; j<num_feature; ++j) {
+      //for(int j=num_feature-1; j<num_feature; ++j) {
         cout<<out0[i][j]<<" ";
       }
       cout<<" ]"<<endl;
     }
   
     cout<<"[final] rank "<<local_rank<<" out1: ";
-    for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
+    for(int i=0; i<num_vertice/NODES; ++i) {
+    //for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
       cout<<"[ ";
-      for(int j=num_w0_out-1; j<num_w0_out; ++j) {
+      for(int j=0; j<num_w0_out; ++j) {
+      //for(int j=num_w0_out-1; j<num_w0_out; ++j) {
         cout<<out1[i][j]<<" ";
       }
       cout<<" ]"<<endl;
     }
   
     cout<<"[final] rank "<<local_rank<<" out2: ";
-    for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
+    for(int i=0; i<num_vertice/NODES; ++i) {
+    //for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
       cout<<"[ ";
-      for(int j=num_w0_out-1; j<num_w0_out; ++j) {
+      for(int j=0; j<num_w0_out; ++j) {
+      //for(int j=num_w0_out-1; j<num_w0_out; ++j) {
         cout<<out2[i][j]<<" ";
       }
       cout<<" ]"<<endl;
     }
   
     cout<<"[final] rank "<<local_rank<<" out3: ";
-    for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
+    for(int i=0; i<num_vertice/NODES; ++i) {
+    //for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
       cout<<"[ ";
       for(int j=0; j<num_w1_out; ++j) {
         cout<<out3[i][j]<<" ";

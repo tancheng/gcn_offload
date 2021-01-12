@@ -161,7 +161,10 @@ inline int ARENA_run() {
  //     initial = false;
  //   else {
       // Task arrival
-    if(ARENA_task_arrive() == ARENA_TERMINATE) break;
+    if(ARENA_task_arrive() == ARENA_TERMINATE) {
+      cout<<"[terminate] rank "<<ARENA_local_rank<<endl;
+      break;
+    }
 //    }
     // Analyzing arriving task
     ARENA_task_analyze();
