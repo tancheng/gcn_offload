@@ -19,7 +19,7 @@
 // implementation, instead of multiple-node MPI version, which is due
 // to the number of nodes in the graph is not dividable by 8.
 //#define VECTORIZATION
-#define DUMMY_DATA
+//#define DUMMY_DATA
 
 
 //#define num_vertice 2708
@@ -477,7 +477,7 @@ void init_task(int argc, char *argv[]) {
   global_start = 0;
 
   init_data();
-  display_input();
+  // display_input();
 }
 
 // ----------------------------------------------------------------------
@@ -536,43 +536,36 @@ int main(int argc, char *argv[]) {
 
   if(local_rank != NODES) {
     cout<<"[final] rank "<<local_rank<<" out0: "<<endl;
-    for(int i=0; i<num_vertice/NODES; ++i) {
-    //for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
+    for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
       cout<<"[ ";
-      for(int j=0; j<num_feature; ++j) {
-      //for(int j=num_feature-1; j<num_feature; ++j) {
+      for(int j=num_feature-1; j<num_feature; ++j) {
         cout<<out0[i][j]<<" ";
       }
       cout<<" ]"<<endl;
     }
   
     cout<<"[final] rank "<<local_rank<<" out1: ";
-    for(int i=0; i<num_vertice/NODES; ++i) {
-    //for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
+    for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
       cout<<"[ ";
-      for(int j=0; j<num_w0_out; ++j) {
-      //for(int j=num_w0_out-1; j<num_w0_out; ++j) {
+      for(int j=num_w0_out-1; j<num_w0_out; ++j) {
         cout<<out1[i][j]<<" ";
       }
       cout<<" ]"<<endl;
     }
   
     cout<<"[final] rank "<<local_rank<<" out2: ";
-    for(int i=0; i<num_vertice/NODES; ++i) {
-    //for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
+    for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
       cout<<"[ ";
-      for(int j=0; j<num_w0_out; ++j) {
-      //for(int j=num_w0_out-1; j<num_w0_out; ++j) {
+      for(int j=num_w0_out-1; j<num_w0_out; ++j) {
         cout<<out2[i][j]<<" ";
       }
       cout<<" ]"<<endl;
     }
   
     cout<<"[final] rank "<<local_rank<<" out3: ";
-    for(int i=0; i<num_vertice/NODES; ++i) {
-    //for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
+    for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
       cout<<"[ ";
-      for(int j=0; j<num_w1_out; ++j) {
+      for(int j=num_w1_out-1; j<num_w1_out; ++j) {
         cout<<out3[i][j]<<" ";
       }
       cout<<" ]"<<endl;

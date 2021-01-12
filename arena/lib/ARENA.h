@@ -535,8 +535,8 @@ inline void ARENA_data_value_send() {
         int length = ARENA_remote_ask_end[i] - ARENA_remote_ask_start[i];
         ARENA_load_data(ARENA_remote_ask_start[i], ARENA_remote_ask_end[i], ARENA_remote_ask_buff[i]);
         ARENA_total_data_out += length;
-        MPI_Send(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value);//, &request_data_value);
-        //MPI_Isend(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value, &request_data_value);
+        //MPI_Send(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value);//, &request_data_value);
+        MPI_Isend(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value, &request_data_value);
 #ifdef DEBUG
         cout<<"[isent data] rank "<<ARENA_local_rank<<" to "<<i<<" with length "<<length<<endl;
 #endif
