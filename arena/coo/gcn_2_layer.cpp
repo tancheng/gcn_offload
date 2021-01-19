@@ -111,7 +111,7 @@ int* data_recv_times;
 void init_data() {
 #ifdef DUMMY_DATA
   num_vertice = 8;
-  num_feature = 4;
+  num_feature = 2;
   num_w0_out = 2;
   num_w1_out = 1;
 
@@ -172,14 +172,14 @@ void init_data() {
   for(int i=0; i<num_vertice; ++i) {
     output_gold[i] = new float[num_w1_out];
   }
-  output_gold[0][0] = 2380;
-  output_gold[1][0] = 2820;
-  output_gold[2][0] = 1926;
-  output_gold[3][0] = 3222;
-  output_gold[4][0] = 1410;
-  output_gold[5][0] = 3538;
-  output_gold[6][0] = 784;
-  output_gold[7][0] = 3720;
+//  output_gold[0][0] = 2380;
+//  output_gold[1][0] = 2820;
+//  output_gold[2][0] = 1926;
+//  output_gold[3][0] = 3222;
+//  output_gold[4][0] = 1410;
+//  output_gold[5][0] = 3538;
+//  output_gold[6][0] = 784;
+//  output_gold[7][0] = 3720;
 
 #endif
 #ifndef DUMMY_DATA
@@ -279,23 +279,18 @@ void init_data() {
   }
   local_V = new float[local_nnz];
   local_COL = new int[local_nnz];
-  local_ROW = new int[num_vertice/NODES+1];
+  local_ROW = new int[local_nnz];
 
   int temp = 0;
-  local_ROW[0] = 0;
-//  cout<<"rank "<<local_rank<<" local_ROW[0]: "<<local_ROW[0]<<endl;
   for(int i=ARENA_local_rank*num_vertice/NODES; i<(ARENA_local_rank+1)*num_vertice/NODES; ++i) {
     for(int j=0; j<num_vertice; ++j) {
       if(global_A[i][j] != 0) {
         local_V[temp] = global_A[i][j];
+        local_ROW[temp] = i-ARENA_local_rank*num_vertice/NODES;
         local_COL[temp] = j;
-//        cout<<"rank "<<local_rank<<" local_V["<<temp<<"]: "<<local_V[temp]<<endl;
-//        cout<<"rank "<<local_rank<<" local_COL["<<temp<<"]: "<<local_COL[temp]<<endl;
         ++temp;
       }
     }
-    local_ROW[i-ARENA_local_rank*num_vertice/NODES+1] = temp;
-//    cout<<"rank "<<local_rank<<" local_ROW["<<i-local_rank*local_bound+1<<"]: "<<temp<<endl;
   }
 
   LAYER0_OPT_ALL = NODES*num_feature;
@@ -443,6 +438,7 @@ void mw1_kernel() {
 //int total_times = 0;
 int opt_count = 0;
 int range;
+int local_cur_index = 0;
 int ARENA_kernel0(int start, int end, int param) {
   range = num_vertice/NODES;
 
@@ -452,7 +448,15 @@ int ARENA_kernel0(int start, int end, int param) {
     sent_tag[i] = false;
   }
   // iterate across the value inside a specific row
-  for(int i=local_ROW[param]; i<local_ROW[param+1]; ++i) {
+//  cout<<"rank "<<ARENA_local_rank<<" new kernel is called... local_nnz: "<<local_nnz<<endl;
+  while(local_ROW[local_cur_index] <= param and local_cur_index<local_nnz) {
+    if(local_ROW[local_cur_index] < param) {
+      local_cur_index += 1;
+      continue;
+    }
+//    cout<<"rank "<<ARENA_local_rank<<" is trying to start from local_cur_index "<<local_cur_index<<" parm: "<<param<<" local_COL[i]: "<<local_COL[local_cur_index]<<endl;
+    int i = local_cur_index;
+//  for(int i=local_ROW[param]; i<local_ROW[param+1]; ++i) {
     // if the index is inside my own data range, accumulate it locally
     if(local_COL[i] >= ARENA_local_start and
        local_COL[i] < ARENA_local_end) {
@@ -482,6 +486,7 @@ int ARENA_kernel0(int start, int end, int param) {
       ARENA_remote_ask_end[local_COL[i]/range] = num_feature;
 
     }
+    local_cur_index += 1;
   }
   
   // iterating the rows by spawning new local tasks untill the boundary
@@ -496,6 +501,7 @@ int ARENA_kernel0(int start, int end, int param) {
     mw0_kernel();
     ARENA_spawn_task(KERNEL_LAYER1, ARENA_local_start, ARENA_local_end,
                      0, ARENA_local_rank, 0, 0);
+    local_cur_index = 0;
   }
 
   return -1;//num_spawn;
@@ -535,7 +541,13 @@ int ARENA_kernel1(int start, int end, int param) {
     sent_tag[i] = false;
   }
   // iterate across the value inside a specific row
-  for(int i=local_ROW[param]; i<local_ROW[param+1]; ++i) {
+  while(local_ROW[local_cur_index] <= param and local_cur_index < local_nnz) {
+    if(local_ROW[local_cur_index] < param) {
+      local_cur_index += 1;
+      continue;
+    }
+    int i = local_cur_index;
+  //for(int i=local_ROW[param]; i<local_ROW[param+1]; ++i) {
     // if the index is inside my own data range, accumulate it locally
     if(local_COL[i] >= ARENA_local_start and
        local_COL[i] < ARENA_local_end) {
@@ -565,6 +577,7 @@ int ARENA_kernel1(int start, int end, int param) {
       ARENA_remote_ask_end[local_COL[i]/range] = num_w0_out;
 
     }
+    local_cur_index += 1;
   }
   
   // iterating the rows by spawning new local tasks untill the boundary
@@ -577,6 +590,7 @@ int ARENA_kernel1(int start, int end, int param) {
   if(opt_count == local_nnz) {
     opt_count = 0;
     mw1_kernel();
+    local_cur_index = 0;
   }
 
   return -1;
