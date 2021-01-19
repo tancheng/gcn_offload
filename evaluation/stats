@@ -37,6 +37,13 @@ pytorch (single CPU)                 : 0.2
 pytorch_geometric (all CPUs)         : 0.01
 pytorch_geometric (single CPU)       : 0.01 (no change)
 
+dense_MPI_4                          : 3.09
+dense_ARENA_4                        : 2.7
+csr_MPI_4                            : 0.044
+csr_ARENA_4                          : 0.078
+coo_MPI_4                            : 0.046
+coo_ARENA_4                          : 0.08
+
 This is also comparable and reasonable enough. Pytorch_geometric
 performs better since it leverages other optimization techniques,
 such as csr format.

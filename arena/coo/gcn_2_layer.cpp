@@ -31,7 +31,7 @@
 #include <fstream>
 #include <string>
 
-//#define DUMMY_DATA
+#define DUMMY_DATA
 
 #define KERNEL_LAYER0 2
 #define KERNEL_LAYER0_ACCUM 3
