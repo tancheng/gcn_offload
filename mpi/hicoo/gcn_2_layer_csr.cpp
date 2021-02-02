@@ -38,6 +38,8 @@
 //#define NODES 8
 //#define NODES 16
 
+#define BLK_SIZE 20
+
 using namespace std;
 
 int local_start;
@@ -70,9 +72,14 @@ float* global_bias1;
 float** output_gold;
 
 int local_nnz;
-float* local_V;
-int* local_COL;
-int* local_ROW;
+float* local_V_COO;
+int* local_COL_COO;
+int* local_ROW_COO;
+float* local_V_HiCOO;
+int* local_COL_HiCOO;
+int* local_ROW_HiCOO;
+int* local_BLK_HiCOO;
+
 
 float** local_X;
 float* communicate_buffer;
@@ -260,19 +267,50 @@ void init_data() {
       }
     }
   }
-  local_V = new float[local_nnz];
-  local_COL = new int[local_nnz];
-  local_ROW = new int[local_nnz];
+
+  local_V_COO = new float[local_nnz];
+  local_COL_COO = new int[local_nnz];
+  local_ROW_COO = new int[local_nnz];
 
   int temp = 0;
   for(int i=local_rank*local_bound; i<local_rank*local_bound+local_bound; ++i) {
     for(int j=0; j<num_vertice; ++j) {
       if(global_A[i][j] != 0) {
-        local_V[temp] = global_A[i][j];
-        local_ROW[temp] = i-local_rank*local_bound;
-        local_COL[temp] = j;
+        local_V_COO[temp] = global_A[i][j];
+        local_ROW_COO[temp] = i-local_rank*local_bound;
+        local_COL_COO[temp] = j;
         ++temp;
       }
+    }
+  }
+
+  local_V_HiCOO = new float[local_nnz];
+  local_COL_HiCOO = new int[local_nnz];
+  local_ROW_HiCOO = new int[local_nnz];
+  local_BLK_HiCOO = new int[local_nnz];
+  int blk_size = 0;
+  if (local_bound < BLK_SIZE) {
+    blk_size = local_bound;
+  } else {
+    blk_size = BLK_SIZE;
+  }
+
+  temp = 0;
+  int blk_id = 0;
+  for(int i=local_rank*local_bound; i<local_rank*local_bound+local_bound; i+=blk_size) {
+    for(int j=0; j<num_vertice; j+=blk_size) {
+      for(int ii=i; ii<min(i+blk_size, local_rank*local_bound+local_bound); ++ii) {
+        for(int jj=j; jj<min(j+blk_size, num_vertice); ++jj) {
+          if(global_A[ii][jj] != 0) {
+            local_V_HiCOO[temp] = global_A[ii][jj];
+            local_ROW_HiCOO[temp] = ii-local_rank*local_bound;
+            local_COL_HiCOO[temp] = jj;
+            local_BLK_HiCOO[temp] = blk_id;
+            ++temp;
+          }
+        }
+      }
+      ++blk_id;
     }
   }
 
@@ -377,26 +415,55 @@ void display_input() {
     cout<<" ]"<<endl;
 //  }
 
-    cout<<"[init csr local_V] rank "<<local_rank<<" : "<<endl;
+    cout<<"[init COO local_V_COO] rank "<<local_rank<<" : "<<endl;
     cout<<"[ ";
     for(int i=0; i<local_nnz; ++i) {
-      cout<<local_V[i]<<" ";
+      cout<<local_V_COO[i]<<" ";
     }
     cout<<" ]"<<endl;
 
-    cout<<"[init csr local_COL] rank "<<local_rank<<" : "<<endl;
+    cout<<"[init COO local_COL_COO] rank "<<local_rank<<" : "<<endl;
     cout<<"[ ";
     for(int i=0; i<local_nnz; ++i) {
-      cout<<local_COL[i]<<" ";
+      cout<<local_COL_COO[i]<<" ";
     }
     cout<<" ]"<<endl;
 
-    cout<<"[init csr local_ROW] rank "<<local_rank<<" : "<<endl;
+    cout<<"[init COO local_ROW_COO] rank "<<local_rank<<" : "<<endl;
     cout<<"[ ";
     for(int i=0; i<local_nnz; ++i) {
-      cout<<local_ROW[i]<<" ";
+      cout<<local_ROW_COO[i]<<" ";
     }
     cout<<" ]"<<endl;
+
+    cout<<"[init HiCOO local_V_HiCOO] rank "<<local_rank<<" : "<<endl;
+    cout<<"[ ";
+    for(int i=0; i<local_nnz; ++i) {
+      cout<<local_V_HiCOO[i]<<" ";
+    }
+    cout<<" ]"<<endl;
+
+    cout<<"[init HiCOO local_COL_HiCOO] rank "<<local_rank<<" : "<<endl;
+    cout<<"[ ";
+    for(int i=0; i<local_nnz; ++i) {
+      cout<<local_COL_HiCOO[i]<<" ";
+    }
+    cout<<" ]"<<endl;
+
+    cout<<"[init HiCOO local_ROW_HiCOO] rank "<<local_rank<<" : "<<endl;
+    cout<<"[ ";
+    for(int i=0; i<local_nnz; ++i) {
+      cout<<local_ROW_HiCOO[i]<<" ";
+    }
+    cout<<" ]"<<endl;
+
+    cout<<"[init HiCOO local_BLK_HiCOO] rank "<<local_rank<<" : "<<endl;
+    cout<<"[ ";
+    for(int i=0; i<local_nnz; ++i) {
+      cout<<local_BLK_HiCOO[i]<<" ";
+    }
+    cout<<" ]"<<endl;
+
 }
 
 void display_output() {
@@ -426,12 +493,12 @@ void display_output() {
 // ----------------------------------------------------------------------
 void ax0_spmv_kernel(int f) {
 //  for(int i=0; i<num_vertice/NODES; ++i) {
-//      for(int k=local_ROW[i]; k<local_ROW[i+1]; ++k) {
-//        out0[i][f] += local_V[k] * communicate_buffer[local_COL[k]]; 
+//      for(int k=local_ROW_COO[i]; k<local_ROW_COO[i+1]; ++k) {
+//        out0[i][f] += local_V_COO[k] * communicate_buffer[local_COL_COO[k]]; 
 //      }
 //  }
   for(int k=0; k<local_nnz; ++k) {
-    out0[local_ROW[k]][f] += local_V[k] * communicate_buffer[local_COL[k]]; 
+    out0[local_ROW_HiCOO[k]][f] += local_V_HiCOO[k] * communicate_buffer[local_COL_HiCOO[k]]; 
   }
   MPI_Test(&request_profile, &flag_profile, &status_profile);
 }
@@ -453,12 +520,12 @@ void mw0_kernel() {
 
 void ax1_spmv_kernel(int f) {
 //  for(int i=0; i<num_vertice/NODES; ++i) {
-//    for(int k=local_ROW[i]; k<local_ROW[i+1]; ++k) {
-//      out2[i][f] += local_V[k] * communicate_buffer[local_COL[k]]; 
+//    for(int k=local_ROW_COO[i]; k<local_ROW_COO[i+1]; ++k) {
+//      out2[i][f] += local_V_COO[k] * communicate_buffer[local_COL_COO[k]]; 
 //    }
 //  }
   for(int k=0; k<local_nnz; ++k) {
-    out2[local_ROW[k]][f] += local_V[k] * communicate_buffer[local_COL[k]]; 
+    out2[local_ROW_HiCOO[k]][f] += local_V_HiCOO[k] * communicate_buffer[local_COL_HiCOO[k]]; 
   }
   MPI_Test(&request_profile, &flag_profile, &status_profile);
 }

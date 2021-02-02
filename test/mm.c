@@ -11,9 +11,9 @@
 inline void reshape_2d(float* t_src, int t_I, int t_J, float** t_dest) {
   int i = 0;
   int j = 0;
-  for (i=0; i<I; ++i) {
-    for (j=0; j<J; ++j) {
-      t_dest[i][j] = t_src[i*J+j];
+  for (i=0; i<t_I; ++i) {
+    for (j=0; j<t_J; ++j) {
+      t_dest[i][j] = t_src[i*t_J+j];
     }
   }
 }
@@ -22,8 +22,8 @@ inline void reshape_1d(float** t_src, int t_I, int t_J, float* t_dest) {
   int i = 0;
   int j = 0;
   int index = 0;
-  for (i=0; i<I; ++i) {
-    for (j=0; j<J; ++j) {
+  for (i=0; i<t_I; ++i) {
+    for (j=0; j<t_J; ++j) {
       t_dest[index] = t_src[i][j];
       ++index;
     }
@@ -122,6 +122,58 @@ void matmult_2d(float* t_a, float* t_b, float* t_c, int t_I, int t_J, int t_K) {
         sub0   = sub0 + a[i][k] * b[k][j];
       }
       c[i][j] = sub0;
+    }
+  }
+
+  t = clock() - t;
+  double time_taken = ((double)t)/CLOCKS_PER_SEC; // in seconds 
+  printf("*** [custom C inside lib] mm: %f seconds ***\n", time_taken);
+
+  reshape_1d(c, t_I, t_J, t_c);
+
+  return;
+}
+
+void matmult_2d_tile(float* t_a, float* t_b, float* t_c, int t_I, int t_J, int t_K) {
+  int i = 0;
+  int j = 0;
+  int k = 0;
+  int ii = 0;
+  int jj = 0;
+  int kk = 0;
+
+  float** a = (float**)malloc(t_I * sizeof(float*));
+  for (i=0; i<t_I; ++i)
+    a[i] = (float*)malloc(t_K * sizeof(float));
+
+  float** b = (float**)malloc(t_K * sizeof(float*));
+  for (i=0; i<t_K; ++i)
+    b[i] = (float*)malloc(t_J * sizeof(float));
+
+  float** c = (float**)malloc(t_I * sizeof(float*));
+  for (i=0; i<t_I; ++i)
+    c[i] = (float*)malloc(t_J * sizeof(float));
+
+
+  reshape_2d(t_a, t_I, t_K, a);
+  reshape_2d(t_b, t_K, t_J, b);
+  reshape_2d(t_c, t_I, t_J, c);
+
+  /*float* c = malloc(nay * sizeof(float));*/
+  clock_t t; 
+  t = clock();
+
+  for (i = 0; i < t_I; i+=TILE) {
+    for (j = 0; j < t_J; j+=TILE) {
+      for (k = 0; k < t_K; k+=TILE) {
+        for (ii = i; ii < i+TILE; ii++) {
+          for (jj = j; jj < j+TILE; jj++) {
+            for (kk = k; kk < k+TILE; kk++) {
+              c[ii][jj] += a[ii][kk] * b[kk][jj];
+            }
+          }
+        }
+      }
     }
   }
 
@@ -506,7 +558,7 @@ void matmult_1d_tile_c2r_vec(float* t_a, float* t_b, float* t_c, int t_I, int t_
   return;
 }
 
-void matmult_2d_tile(float* t_a, float* t_b, float* t_c, int t_I, int t_J, int t_K) {
+void matmult_2d_tile_reshape4d(float* t_a, float* t_b, float* t_c, int t_I, int t_J, int t_K) {
   int i = 0;
   int j = 0;
   int k = 0;
