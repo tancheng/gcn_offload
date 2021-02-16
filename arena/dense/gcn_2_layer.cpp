@@ -31,7 +31,7 @@
 #include <fstream>
 #include <string>
 
-//#define DUMMY_DATA
+#define DUMMY_DATA
 
 #define KERNEL_LAYER0 2
 #define KERNEL_LAYER1 3
@@ -377,6 +377,7 @@ int layer = 0;
 int opt_count = 0;
 int k_dim = 0;
 int ARENA_kernel0(int start, int end, int param) {
+  cout<<"rank "<<ARENA_local_rank<<" start "<<start<<" end "<<end<<endl;
   layer = 0;
   ++opt_count;
   bool first_exe = false;

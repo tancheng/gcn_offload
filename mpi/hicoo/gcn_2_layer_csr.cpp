@@ -72,14 +72,22 @@ float* global_bias1;
 float** output_gold;
 
 int local_nnz;
+int local_nnb = 1;
+int blk_size;
 float* local_V_COO;
 int* local_COL_COO;
 int* local_ROW_COO;
 float* local_V_HiCOO;
-int* local_COL_HiCOO;
-int* local_ROW_HiCOO;
-int* local_BLK_HiCOO;
+//int* temp_local_COL_HiCOO;
+//int* temp_local_ROW_HiCOO;
+int* temp_local_BLK_COL_HiCOO;
+int* temp_local_BLK_ROW_HiCOO;
 
+char* local_COL_HiCOO;
+char* local_ROW_HiCOO;
+int* local_BLK_COL_HiCOO;
+int* local_BLK_ROW_HiCOO;
+int* local_BLK_SIZE_HiCOO;
 
 float** local_X;
 float* communicate_buffer;
@@ -246,6 +254,7 @@ void init_data() {
 
   local_bound = num_vertice/NODES;
 
+//  global_A[0][4] = 1;
   local_A = new float*[num_vertice/NODES];
   local_X = new float*[num_vertice/NODES];
   for(int i=0; i<num_vertice/NODES; ++i) {
@@ -285,10 +294,12 @@ void init_data() {
   }
 
   local_V_HiCOO = new float[local_nnz];
-  local_COL_HiCOO = new int[local_nnz];
-  local_ROW_HiCOO = new int[local_nnz];
-  local_BLK_HiCOO = new int[local_nnz];
-  int blk_size = 0;
+  local_COL_HiCOO = new char[local_nnz];
+  local_ROW_HiCOO = new char[local_nnz];
+  temp_local_BLK_COL_HiCOO = new int[local_nnz];
+  temp_local_BLK_ROW_HiCOO = new int[local_nnz];
+
+  blk_size = 0;
   if (local_bound < BLK_SIZE) {
     blk_size = local_bound;
   } else {
@@ -296,21 +307,44 @@ void init_data() {
   }
 
   temp = 0;
-  int blk_id = 0;
   for(int i=local_rank*local_bound; i<local_rank*local_bound+local_bound; i+=blk_size) {
     for(int j=0; j<num_vertice; j+=blk_size) {
       for(int ii=i; ii<min(i+blk_size, local_rank*local_bound+local_bound); ++ii) {
         for(int jj=j; jj<min(j+blk_size, num_vertice); ++jj) {
           if(global_A[ii][jj] != 0) {
             local_V_HiCOO[temp] = global_A[ii][jj];
-            local_ROW_HiCOO[temp] = ii-local_rank*local_bound;
-            local_COL_HiCOO[temp] = jj;
-            local_BLK_HiCOO[temp] = blk_id;
+            local_ROW_HiCOO[temp] = char((ii-local_rank*local_bound)%blk_size);
+            local_COL_HiCOO[temp] = char(jj%blk_size);
+            temp_local_BLK_ROW_HiCOO[temp] = (i-local_rank*local_bound)/blk_size;
+            temp_local_BLK_COL_HiCOO[temp] = j/blk_size;
+            if(temp != 0 and (temp_local_BLK_COL_HiCOO[temp] != temp_local_BLK_COL_HiCOO[temp-1] or temp_local_BLK_ROW_HiCOO[temp] != temp_local_BLK_ROW_HiCOO[temp-1])) {
+              local_nnb++;
+            }
             ++temp;
           }
         }
       }
-      ++blk_id;
+    }
+  }
+
+  local_BLK_COL_HiCOO = new int[local_nnb];
+  local_BLK_ROW_HiCOO = new int[local_nnb];
+  local_BLK_SIZE_HiCOO = new int[local_nnb];
+  for(int i=0; i<local_nnb; ++i) {
+    local_BLK_SIZE_HiCOO[i] = 0;
+  }
+  temp = 0;
+  local_BLK_COL_HiCOO[temp] = temp_local_BLK_COL_HiCOO[0];
+  local_BLK_ROW_HiCOO[temp] = temp_local_BLK_ROW_HiCOO[0];
+  local_BLK_SIZE_HiCOO[temp] += 1;
+  for(int i=1; i<local_nnz; ++i) {
+    if(temp_local_BLK_COL_HiCOO[i] != temp_local_BLK_COL_HiCOO[i-1] or temp_local_BLK_ROW_HiCOO[i] != temp_local_BLK_ROW_HiCOO[i-1]) {
+      temp++;
+      local_BLK_COL_HiCOO[temp] = temp_local_BLK_COL_HiCOO[i];
+      local_BLK_ROW_HiCOO[temp] = temp_local_BLK_ROW_HiCOO[i];
+      local_BLK_SIZE_HiCOO[temp] = local_BLK_SIZE_HiCOO[temp-1] + 1;
+    } else {
+      local_BLK_SIZE_HiCOO[temp] += 1;
     }
   }
 
@@ -364,7 +398,7 @@ bool verify(float** a, float** b) {
 }
 
 void display_input() {
-//  if(local_rank == NODES-1) {
+  if(local_rank == 0) {
     cout<<"[init A] rank "<<local_rank<<" : "<<endl;
     for(int i=0; i<num_vertice/NODES; ++i) {
       cout<<"[ ";
@@ -446,24 +480,38 @@ void display_input() {
     cout<<"[init HiCOO local_COL_HiCOO] rank "<<local_rank<<" : "<<endl;
     cout<<"[ ";
     for(int i=0; i<local_nnz; ++i) {
-      cout<<local_COL_HiCOO[i]<<" ";
+      cout<<int(local_COL_HiCOO[i])<<" ";
     }
     cout<<" ]"<<endl;
 
     cout<<"[init HiCOO local_ROW_HiCOO] rank "<<local_rank<<" : "<<endl;
     cout<<"[ ";
     for(int i=0; i<local_nnz; ++i) {
-      cout<<local_ROW_HiCOO[i]<<" ";
+      cout<<int(local_ROW_HiCOO[i])<<" ";
     }
     cout<<" ]"<<endl;
 
-    cout<<"[init HiCOO local_BLK_HiCOO] rank "<<local_rank<<" : "<<endl;
+    cout<<"[init HiCOO local_BLK_COL_HiCOO] rank "<<local_rank<<" : "<<endl;
     cout<<"[ ";
-    for(int i=0; i<local_nnz; ++i) {
-      cout<<local_BLK_HiCOO[i]<<" ";
+    for(int i=0; i<local_nnb; ++i) {
+      cout<<local_BLK_COL_HiCOO[i]<<" ";
     }
     cout<<" ]"<<endl;
 
+    cout<<"[init HiCOO local_BLK_ROW_HiCOO] rank "<<local_rank<<" : "<<endl;
+    cout<<"[ ";
+    for(int i=0; i<local_nnb; ++i) {
+      cout<<local_BLK_ROW_HiCOO[i]<<" ";
+    }
+    cout<<" ]"<<endl;
+
+    cout<<"[init HiCOO local_BLK_SIZE_HiCOO] rank "<<local_rank<<" : "<<endl;
+    cout<<"[ ";
+    for(int i=0; i<local_nnb; ++i) {
+      cout<<local_BLK_SIZE_HiCOO[i]<<" ";
+    }
+    cout<<" ]"<<endl;
+  }
 }
 
 void display_output() {
@@ -497,9 +545,31 @@ void ax0_spmv_kernel(int f) {
 //        out0[i][f] += local_V_COO[k] * communicate_buffer[local_COL_COO[k]]; 
 //      }
 //  }
-  for(int k=0; k<local_nnz; ++k) {
-    out0[local_ROW_HiCOO[k]][f] += local_V_HiCOO[k] * communicate_buffer[local_COL_HiCOO[k]]; 
+
+//  for(int k=0; k<local_nnz; ++k) {
+//    out0[local_ROW_HiCOO[k]][f] += local_V_HiCOO[k] * communicate_buffer[local_COL_HiCOO[k]]; 
+//  }
+
+  for(int b=0; b<local_nnb; ++b) {
+//    if(local_rank==0)
+//    cout<<"[DEBUG] rank "<<local_rank<<" blk: "<<b<<endl;
+    int start = 0;
+    if(b != 0) {
+      start = local_BLK_SIZE_HiCOO[b-1];
+    }
+    int blk_row = local_BLK_ROW_HiCOO[b]*blk_size;
+    int blk_col = local_BLK_COL_HiCOO[b]*blk_size;
+    for(int k=start; k<local_BLK_SIZE_HiCOO[b]; ++k) {
+      int row = blk_row+int(local_ROW_HiCOO[k]);
+      int col = blk_col+int(local_COL_HiCOO[k]);
+//    if(local_rank==0)
+//      cout<<"[DEBUG] rank "<<local_rank<<" k: "<<k<<"; row: "<<row<<"; col: "<<col<<endl;
+      out0[row][f] += local_V_HiCOO[k] * communicate_buffer[col]; 
+//    if(local_rank==0)
+//      cout<<"[DEBUG] rank "<<local_rank<<" k: "<<k<<"; row: "<<row<<"; col: "<<col<<" done"<<endl;
+    }
   }
+
   MPI_Test(&request_profile, &flag_profile, &status_profile);
 }
 
@@ -524,9 +594,25 @@ void ax1_spmv_kernel(int f) {
 //      out2[i][f] += local_V_COO[k] * communicate_buffer[local_COL_COO[k]]; 
 //    }
 //  }
-  for(int k=0; k<local_nnz; ++k) {
-    out2[local_ROW_HiCOO[k]][f] += local_V_HiCOO[k] * communicate_buffer[local_COL_HiCOO[k]]; 
+
+//  for(int k=0; k<local_nnz; ++k) {
+//    out2[local_ROW_HiCOO[k]][f] += local_V_HiCOO[k] * communicate_buffer[local_COL_HiCOO[k]]; 
+//  }
+
+  for(int b=0; b<local_nnb; ++b) {
+    int start = 0;
+    if(b != 0) {
+      start = local_BLK_SIZE_HiCOO[b-1];
+    }
+    int blk_row = local_BLK_ROW_HiCOO[b]*blk_size;
+    int blk_col = local_BLK_COL_HiCOO[b]*blk_size;
+    for(int k=start; k<local_BLK_SIZE_HiCOO[b]; ++k) {
+      int row = blk_row+int(local_ROW_HiCOO[k]);
+      int col = blk_col+int(local_COL_HiCOO[k]);
+      out2[row][f] += local_V_HiCOO[k] * communicate_buffer[col]; 
+    }
   }
+
   MPI_Test(&request_profile, &flag_profile, &status_profile);
 }
 
