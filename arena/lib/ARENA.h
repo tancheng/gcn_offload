@@ -60,12 +60,10 @@ int      ARENA_tag[ARENA_TAG_SIZE];
 int      ARENA_global_start;
 int      ARENA_global_end;
 int      ARENA_global_param;
-int*     ARENA_local_need_start;
-int*     ARENA_local_need_end;
-int*     ARENA_remote_ask_start;
-int*     ARENA_remote_ask_end;
-float**  ARENA_remote_ask_buff;
-float**  ARENA_local_need_buff;
+queue<int>* ARENA_remote_ask_start;
+queue<int>* ARENA_remote_ask_end;
+float** ARENA_remote_ask_buff;
+float** ARENA_local_need_buff;
 void     ARENA_load_data(int, int, float*);
 void     ARENA_store_data(int, int, int, float*);
 bool     ARENA_encounter_terminator = false;
@@ -287,18 +285,14 @@ inline void ARENA_init_data_buff(int buff_size, bool depend) {
   ARENA_data_depend_task = depend;
   ARENA_has_data_delivery = true;
 
-  ARENA_remote_ask_start = new int[ARENA_nodes];
-  ARENA_local_need_start = new int[ARENA_nodes];
-  ARENA_remote_ask_end   = new int[ARENA_nodes];
-  ARENA_local_need_end   = new int[ARENA_nodes];
+  ARENA_remote_ask_start = new queue<int>[ARENA_nodes];
+  ARENA_remote_ask_end   = new queue<int>[ARENA_nodes];
   ARENA_remote_ask_buff  = new float*[ARENA_nodes];
   ARENA_local_need_buff  = new float*[ARENA_nodes];
-  for(int i=0; i<ARENA_nodes; ++i) {
-    ARENA_remote_ask_start[i] = -1;
-    ARENA_local_need_start[i] = -1;
-    ARENA_remote_ask_end[i]   = -1;
-    ARENA_local_need_end[i]   = -1;
-  }
+//  for(int i=0; i<ARENA_nodes; ++i) {
+//    ARENA_remote_ask_start[i] = -1;
+//    ARENA_remote_ask_end[i]   = -1;
+//  }
 
 //  for(int i=0; i<ARENA_nodes; ++i) {
 //    ARENA_remote_ask_buff[i] = new float[buff_size*(i+1)];
@@ -532,9 +526,13 @@ inline void ARENA_data_value_send() {
      ARENA_target_end > -1   and ARENA_target_start > -1) {
     // Necessary data send
     for(int i=0; i<ARENA_nodes; ++i) {
-      if (i != ARENA_local_rank and ARENA_remote_ask_start[i] != -1) {// and ARENA_target_more_end != ARENA_target_more_start) {
-        int length = ARENA_remote_ask_end[i] - ARENA_remote_ask_start[i];
-        ARENA_load_data(ARENA_remote_ask_start[i], ARENA_remote_ask_end[i], ARENA_remote_ask_buff[i]);
+      if (i != ARENA_local_rank and not ARENA_remote_ask_start[i].empty()) {// and ARENA_target_more_end != ARENA_target_more_start) {
+        int temp_start = ARENA_remote_ask_start[i].front();
+        int temp_end = ARENA_remote_ask_end[i].front();
+        ARENA_remote_ask_start[i].pop();
+        ARENA_remote_ask_end[i].pop();
+        int length = temp_end - temp_start;
+        ARENA_load_data(temp_start, temp_end, ARENA_remote_ask_buff[i]);
         ARENA_total_data_out += length;
         //MPI_Send(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value);//, &request_data_value);
         MPI_Ibsend(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value, &request_data_value);
@@ -542,8 +540,6 @@ inline void ARENA_data_value_send() {
 #ifdef DEBUG
         cout<<"[isent data] rank "<<ARENA_local_rank<<" to "<<i<<" with length "<<length<<endl;
 #endif
-        ARENA_remote_ask_start[i] = -1;
-        ARENA_remote_ask_end[i] = -1;
       }
     }
   }
