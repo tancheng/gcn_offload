@@ -31,7 +31,7 @@
 #include <fstream>
 #include <string>
 
-//#define DUMMY_DATA
+#define DUMMY_DATA
 
 #define KERNEL_LAYER0 2
 #define KERNEL_LAYER0_ACCUM 3
@@ -64,6 +64,9 @@
 // TODO: user specified.
 // ----------------------------------------------------------------------
 #define SPARSE 3
+
+#define BLK_SIZE 20
+
 int num_vertice;
 int num_feature;
 int num_w0_out;
@@ -97,12 +100,26 @@ bool verify(float**, float**); // helper function
 
 int num_nonzero_A = 0;         // for csr format
 int local_nnz;                 // for csr format
+int local_nnb = 1;
+int blk_size;
 float* local_V;                // for csr format
 int* local_COL;                // for csr format
 int* local_ROW;                // for csr format
 
+float* local_V_HiCOO;
+int* temp_local_BLK_COL_HiCOO;
+int* temp_local_BLK_ROW_HiCOO;
+
+char* local_COL_HiCOO;
+int* local_BLK_COL_HiCOO;
+int* local_BLK_ROW_HiCOO;
+int* local_BLK_SIZE_HiCOO;
+int range;
+
 int* data_send_times;
 int* data_recv_times;
+
+bool** sent_tag;
 
 // ----------------------------------------------------------------------
 // local data initialization.
@@ -134,11 +151,7 @@ void init_data() {
   for(int i=0; i<num_vertice; ++i) {
     global_X[i] = new float[num_feature];
     for(int j=0; j<num_feature; ++j) {
-      global_X[i][j] = i*num_feature + j;//(i+j)%2;
-//      if((i+j)%2 == 0)
-//        global_X[i][j] = 1.0-(i*num_feature+j)%10;//(i*num_vertice+j);
-//      else
-//        global_X[i][j] = 1.0+(i*num_feature+j)%10;//(i*num_vertice+j);
+      global_X[i][j] = i*num_feature + j;
     }
   }
 
@@ -256,9 +269,23 @@ void init_data() {
 #endif
 
   data_send_times = new int[num_vertice/NODES];
+  for(int i=0; i<num_vertice/NODES; ++i) {
+    data_send_times[i] = 0;
+  }
   data_recv_times = new int[NODES];
   for(int i=0; i<NODES; ++i) {
     data_recv_times[i] = 0;
+  }
+
+  for(int i=ARENA_local_rank*num_vertice/NODES; i<(ARENA_local_rank+1)*num_vertice/NODES; ++i) {
+    for(int j=0; j<num_vertice; j+=num_vertice/NODES) {
+      for(int jj=j; jj<min(num_vertice, j+num_vertice/NODES); ++jj) {
+        if(global_A[i][jj] != 0 and (jj<ARENA_local_rank*num_vertice/NODES or jj>=(ARENA_local_rank+1)*num_vertice/NODES)) {
+          data_send_times[i-ARENA_local_rank*num_vertice/NODES]++;
+          break;
+        }
+      }
+    }
   }
 
   for(int i=0; i<num_vertice; ++i) {
@@ -290,6 +317,67 @@ void init_data() {
         local_COL[temp] = j;
         ++temp;
       }
+    }
+  }
+
+  local_V_HiCOO = new float[local_nnz];
+  local_COL_HiCOO = new char[local_nnz];
+  temp_local_BLK_COL_HiCOO = new int[local_nnz];
+  temp_local_BLK_ROW_HiCOO = new int[local_nnz];
+
+  range = num_vertice/NODES;
+  blk_size = 0;
+  if (range< BLK_SIZE) {
+    blk_size = range;
+  } else {
+    blk_size = BLK_SIZE;
+  }
+
+  temp = 0;
+  for(int i=ARENA_local_rank*range; i<ARENA_local_rank*range+range; ++i) {
+    for(int j=0; j<num_vertice; j+=blk_size) {
+      for(int jj=j; jj<min(j+blk_size, num_vertice); ++jj) {
+        if(global_A[i][jj] != 0) {
+          local_V_HiCOO[temp] = global_A[i][jj];
+          local_COL_HiCOO[temp] = char(jj%blk_size);
+          temp_local_BLK_ROW_HiCOO[temp] = i-ARENA_local_rank*range;
+          temp_local_BLK_COL_HiCOO[temp] = j/blk_size;
+          if(temp != 0 and (temp_local_BLK_COL_HiCOO[temp] != temp_local_BLK_COL_HiCOO[temp-1] or temp_local_BLK_ROW_HiCOO[temp] != temp_local_BLK_ROW_HiCOO[temp-1])) {
+            local_nnb++;
+          }
+          ++temp;
+        }
+      }
+    }
+  }
+
+  local_BLK_COL_HiCOO = new int[local_nnb];
+  local_BLK_ROW_HiCOO = new int[local_nnb];
+  local_BLK_SIZE_HiCOO = new int[local_nnb];
+  for(int i=0; i<local_nnb; ++i) {
+    local_BLK_SIZE_HiCOO[i] = 0;
+  }
+  temp = 0;
+  local_BLK_COL_HiCOO[temp] = temp_local_BLK_COL_HiCOO[0];
+  local_BLK_ROW_HiCOO[temp] = temp_local_BLK_ROW_HiCOO[0];
+  local_BLK_SIZE_HiCOO[temp] += 1;
+
+  for(int i=1; i<local_nnz; ++i) {
+    if(temp_local_BLK_COL_HiCOO[i] != temp_local_BLK_COL_HiCOO[i-1] or temp_local_BLK_ROW_HiCOO[i] != temp_local_BLK_ROW_HiCOO[i-1]) {
+      temp++;
+      local_BLK_COL_HiCOO[temp] = temp_local_BLK_COL_HiCOO[i];
+      local_BLK_ROW_HiCOO[temp] = temp_local_BLK_ROW_HiCOO[i];
+      local_BLK_SIZE_HiCOO[temp] = local_BLK_SIZE_HiCOO[temp-1] + 1;
+    } else {
+      local_BLK_SIZE_HiCOO[temp] += 1;
+    }
+  }
+
+  sent_tag = new bool*[num_vertice/NODES];
+  for(int i=0; i<num_vertice/NODES; ++i) {
+    sent_tag[i] = new bool[NODES];
+    for(int j=0; j<NODES; ++j) {
+      sent_tag[i][j] = false;
     }
   }
 
@@ -401,6 +489,14 @@ void init_data() {
 
 }
 
+void reset_sent_tag() {
+  for(int i=0; i<num_vertice/NODES; ++i) {
+    for(int j=0; j<NODES; ++j) {
+      sent_tag[i][j] = false;
+    }
+  }
+}
+
 void mw0_kernel() {
   float temp = 0;
   for(int k=0; k<num_w0_out; ++k) {
@@ -437,69 +533,64 @@ void mw1_kernel() {
 // ----------------------------------------------------------------------
 //int total_times = 0;
 int opt_count = 0;
-int range;
-int local_cur_index0 = 0;
 int ARENA_kernel0(int start, int end, int param) {
-  range = num_vertice/NODES;
 
-  data_send_times[param] = 0;
-  bool* sent_tag = new bool[NODES];
-  for(int i=0; i<NODES; ++i) {
-    sent_tag[i] = false;
-  }
   // iterate across the value inside a specific row
-//  cout<<"rank "<<ARENA_local_rank<<" new kernel is called... local_nnz: "<<local_nnz<<endl;
-  while(local_ROW[local_cur_index0] <= param and local_cur_index0<local_nnz) {
-    if(local_ROW[local_cur_index0] < param) {
-      local_cur_index0 += 1;
-      continue;
-    }
-//    cout<<"rank "<<ARENA_local_rank<<" is trying to start from local_cur_index "<<local_cur_index<<" parm: "<<param<<" local_COL[i]: "<<local_COL[local_cur_index]<<endl;
-    int i = local_cur_index0;
-//  for(int i=local_ROW[param]; i<local_ROW[param+1]; ++i) {
+//  cout<<"rank "<<ARENA_local_rank<<" new kernel is called... local_nnz: "<<local_nnz<<"; param: "<<param<<endl;
+  int begin = 0;
+  if(param != 0) {
+    begin = local_BLK_SIZE_HiCOO[param-1];
+  }
+//  if(ARENA_local_rank == 0)
+//  cout<<"rank "<<ARENA_local_rank<<" begin: "<<begin<<"; end: "<<local_BLK_SIZE_HiCOO[param]<<"; param: "<<param<<"; local_nnb: "<<local_nnb<<endl;
+  int row = local_BLK_ROW_HiCOO[param];
+  //data_send_times[row] = 0;
+  int blk_col = local_BLK_COL_HiCOO[param]*blk_size;
+  for(int i=begin; i<local_BLK_SIZE_HiCOO[param]; ++i) {
+    int col = blk_col + local_COL_HiCOO[i];
     // if the index is inside my own data range, accumulate it locally
-    if(local_COL[i] >= ARENA_local_start and
-       local_COL[i] < ARENA_local_end) {
+    if(col >= ARENA_local_start and col < ARENA_local_end) {
       for(int x=0; x<num_feature; ++x) {
-//        cout<<"rank "<<ARENA_local_rank<<" ready to self partial sum local["<<param<<"]["<<x<<"] "<<local_X[param][x]<<" add to out0["<<local_COL[i]-ARENA_local_start<<"]["<<x<<"] "<<out0[local_COL[i]-ARENA_local_start][x]<<endl;
-        out0[local_COL[i]-ARENA_local_start][x] += local_X[param][x];
+//        if(ARENA_local_rank == 0)
+//        cout<<"rank "<<ARENA_local_rank<<" ready to self partial sum local["<<row<<"]["<<x<<"]: "<<local_X[row][x]<<" add to out0["<<col-ARENA_local_start<<"]["<<x<<"]: "<<out0[col-ARENA_local_start][x]<<endl;
+        out0[col-ARENA_local_start][x] += local_X[row][x];
       }
       // count the number of operation to guide the start of next layer
       ++opt_count;
+//      cout<<"rank "<<ARENA_local_rank<<" done partial add"<<endl;
     } else {
       // NOTE that ARENA does not allow send to one destination multiple times at one shot! Thus, we only send features to a destination once.
-      int dest = local_COL[i]/range;
-      if(!sent_tag[dest]) {
-//        cout<<"rank "<<ARENA_local_rank<<" spawn remote task at row "<<param<<" from "<<local_COL[i]<<" to "<<local_COL[i]+1<<" and send features"<<endl;
-        sent_tag[dest] = true;
-        ARENA_spawn_task(KERNEL_LAYER0_ACCUM, local_COL[i],
-                         local_COL[i]+1, param+ARENA_local_start,
+      int dest = col/range;
+//      cout<<"rank "<<ARENA_local_rank<<" check row: "<<row<<"; dest: "<<dest<<"; sent_tag[row][dest]: "<<sent_tag[row][dest]<<endl;
+      if(!sent_tag[row][dest]) {
+//        cout<<"rank "<<ARENA_local_rank<<" spawn remote task at row "<<row<<" for col "<<col<<" targeting node "<<dest<<" and send features dest: "<<dest<<endl;
+        sent_tag[row][dest] = true;
+        ARENA_spawn_task(KERNEL_LAYER0_ACCUM, col, col+1, 0,
                          ARENA_local_rank, 0, num_feature);
-        data_send_times[param] += 1;
+        //data_send_times[row] += 1;
       } else {
-//        cout<<"rank "<<ARENA_local_rank<<" spawn remote task at row "<<param<<" from "<<local_COL[i]<<" to "<<local_COL[i]+1<<" WITHOUT send features"<<endl;
-        ARENA_spawn_task(KERNEL_LAYER0_ACCUM, local_COL[i],
-                         local_COL[i]+1, param+ARENA_local_start,
+//        cout<<"rank "<<ARENA_local_rank<<" spawn remote task at row "<<row<<" for col "<<col<<" targeting node "<<dest<<" and WITHOUT sending features; param: "<<param<<"; range: "<<range<<"; col/range: "<<col/range<<endl;
+        ARENA_spawn_task(KERNEL_LAYER0_ACCUM, col, col+1, 0,
                          ARENA_local_rank, 0, 0);
       }
-      ARENA_remote_ask_start[local_COL[i]/range] = 0;
-      ARENA_remote_ask_end[local_COL[i]/range] = num_feature;
-
+      ARENA_remote_ask_start[col/range] = 0;
+      ARENA_remote_ask_end[col/range] = num_feature;
     }
-    local_cur_index0 += 1;
   }
   
   // iterating the rows by spawning new local tasks untill the boundary
-  if(param < range-1) {
+  if(param < local_nnb-1) {
     ARENA_spawn_task(KERNEL_LAYER0, ARENA_local_start, ARENA_local_end,
                      param+1, ARENA_local_rank, 0, 0);
   }
 
+//  cout<<"rank "<<ARENA_local_rank<<" at row "<<row<<"; param "<<param<<" done kernel0; opt_count: "<<opt_count<<"; local_nnz: "<<local_nnz<<endl;
+
   // start next layer
   if(opt_count == local_nnz) {
     opt_count = 0;
-    local_cur_index0 = 0;
     mw0_kernel();
+    reset_sent_tag();
     ARENA_spawn_task(KERNEL_LAYER1, ARENA_local_start, ARENA_local_end,
                      0, ARENA_local_rank, 0, 0);
   }
@@ -509,8 +600,11 @@ int ARENA_kernel0(int start, int end, int param) {
 
 int ARENA_kernel0_accum(int start, int end, int param) {
   ++opt_count;
-//  cout<<"rank "<<ARENA_local_rank<<" ready to partial sum at local_start "<<start<<" aka global start "<<ARENA_local_start+start<<endl;
+
   for(int i=0; i<num_feature; ++i) {
+//    cout<<"[ACCU] rank "<<ARENA_local_rank<<" ready to REMOTE partial sum buff["<<i<<"]: "<<buff_X[i]<<" add to out0["<<start<<"]["<<i<<"]: "<<out0[start][i]<<endl;
+
+
 //    cout<<"rank "<<ARENA_local_rank<<" buff_X["<<i<<"] "<<buff_X[i]<<" added into out0["<<start<<"]["<<i<<"]"<<endl; 
     out0[start][i] += buff_X[i];
 
@@ -522,6 +616,7 @@ int ARENA_kernel0_accum(int start, int end, int param) {
   if(opt_count == local_nnz) {
     opt_count = 0;
     mw0_kernel();
+    reset_sent_tag();
     ARENA_spawn_task(KERNEL_LAYER1, ARENA_local_start, ARENA_local_end,
                      0, ARENA_local_rank, 0, 0);
   }
@@ -533,71 +628,70 @@ int cur_layer = 0;
 int local_cur_index1 = 0;
 int k_dim;
 int ARENA_kernel1(int start, int end, int param) {
+//  cout<<"[layer2 push] rank "<<ARENA_local_rank<<" start layer2 push"<<endl;
   cur_layer = 1;
-  range = num_vertice/NODES;
 
-  data_send_times[param] = 0;
-  bool* sent_tag = new bool[NODES];
-  for(int i=0; i<NODES; ++i) {
-    sent_tag[i] = false;
-  }
   // iterate across the value inside a specific row
-  while(local_ROW[local_cur_index1] <= param and local_cur_index1 < local_nnz) {
-    if(local_ROW[local_cur_index1] < param) {
-      local_cur_index1 += 1;
-      continue;
-    }
-    int i = local_cur_index1;
-  //for(int i=local_ROW[param]; i<local_ROW[param+1]; ++i) {
+  int begin = 0;
+  if(param != 0) {
+    begin = local_BLK_SIZE_HiCOO[param-1];
+  }
+  int row = local_BLK_ROW_HiCOO[param];
+  //data_send_times[row] = 0;
+  int blk_col = local_BLK_COL_HiCOO[param]*blk_size;
+  for(int i=begin; i<local_BLK_SIZE_HiCOO[param]; ++i) {
+    int col = blk_col + local_COL_HiCOO[i];
     // if the index is inside my own data range, accumulate it locally
-    if(local_COL[i] >= ARENA_local_start and
-       local_COL[i] < ARENA_local_end) {
+    if(col >= ARENA_local_start and col < ARENA_local_end) {
+//      cout<<"[layer2] rank "<<ARENA_local_rank<<" ready to self partial sum local["<<row<<"][*] add to out2["<<col-ARENA_local_start<<"][*]; row: "<<row<<endl;
       for(int x=0; x<num_w0_out; ++x) {
-//        cout<<"layer 1 rank "<<ARENA_local_rank<<" ready to self partial sum out1["<<param<<"]["<<x<<"] "<<out1[param][x]<<" add to out2["<<local_COL[i]-ARENA_local_start<<"]["<<x<<"] "<<out2[local_COL[i]-ARENA_local_start][x]<<endl;
-        out2[local_COL[i]-ARENA_local_start][x] += out1[param][x];
+//        cout<<"rank "<<ARENA_local_rank<<" ready to self partial sum local["<<param<<"]["<<x<<"] "<<local_X[param][x]<<" add to out0["<<local_COL[i]-ARENA_local_start<<"]["<<x<<"] "<<out0[local_COL[i]-ARENA_local_start][x]<<endl;
+        out2[col-ARENA_local_start][x] += out1[row][x];
       }
+//      cout<<"[layer2] rank "<<ARENA_local_rank<<" done self partial add"<<endl;
       // count the number of operation to guide the start of next layer
       ++opt_count;
     } else {
       // NOTE that ARENA does not allow send to one destination multiple times at one shot! Thus, we only send features to a destination once.
-      int dest = local_COL[i]/range;
-      if(!sent_tag[dest]) {
+      int dest = col/range;
+//      cout<<"[layer2] rank "<<ARENA_local_rank<<" check row: "<<row<<"; dest: "<<dest<<"; sent_tag[row][dest]: "<<sent_tag[row][dest]<<endl;
+      if(!sent_tag[row][dest]) {
 //        cout<<"layer 1 rank "<<ARENA_local_rank<<" spawn remote task at row "<<param<<" from "<<local_COL[i]<<" to "<<local_COL[i]+1<<" and send features"<<endl;
-        sent_tag[dest] = true;
-        ARENA_spawn_task(KERNEL_LAYER1_ACCUM, local_COL[i],
-                         local_COL[i]+1, param+ARENA_local_start,
+        sent_tag[row][dest] = true;
+        ARENA_spawn_task(KERNEL_LAYER1_ACCUM, col, col+1, 0,
                          ARENA_local_rank, 0, num_w0_out);
-        data_send_times[param] += 1;
+        //data_send_times[row] += 1;
       } else {
 //        cout<<"layer 1 rank "<<ARENA_local_rank<<" spawn remote task at row "<<param<<" from "<<local_COL[i]<<" to "<<local_COL[i]+1<<" WITHOUT send features"<<endl;
-        ARENA_spawn_task(KERNEL_LAYER1_ACCUM, local_COL[i],
-                         local_COL[i]+1, param+ARENA_local_start,
+        ARENA_spawn_task(KERNEL_LAYER1_ACCUM, col, col+1, 0,
                          ARENA_local_rank, 0, 0);
       }
-      ARENA_remote_ask_start[local_COL[i]/range] = 0;
-      ARENA_remote_ask_end[local_COL[i]/range] = num_w0_out;
+      ARENA_remote_ask_start[col/range] = 0;
+      ARENA_remote_ask_end[col/range] = num_w0_out;
+//      cout<<"[layer2] rank "<<ARENA_local_rank<<" done remote spawn"<<endl;
 
     }
-    local_cur_index1 += 1;
   }
   
   // iterating the rows by spawning new local tasks untill the boundary
-  if(param < range-1) {
+  if(param < local_nnb-1) {
     ARENA_spawn_task(KERNEL_LAYER1, ARENA_local_start, ARENA_local_end,
                      param+1, ARENA_local_rank, 0, 0);
   }
 
   // start next layer
   if(opt_count == local_nnz) {
-    opt_count = 0;
-    local_cur_index1 = 0;
+    opt_count = 0; 
     mw1_kernel();
   }
+
+//  cout<<"[layer2 push] rank "<<ARENA_local_rank<<" done layer2 push opt_count: "<<opt_count<<"; local_nnz: "<<local_nnz<<endl;
 
   return -1;
 }
 
 int ARENA_kernel1_accum(int start, int end, int param) {
+//  cout<<"[layer2 accu] rank "<<ARENA_local_rank<<" start layer2 accu"<<endl;
   ++opt_count;
 //  cout<<"layer 1 rank "<<ARENA_local_rank<<" ready to partial sum at local_start "<<start<<" aka global start "<<ARENA_local_start+start<<endl;
   for(int i=0; i<num_w0_out; ++i) {
@@ -607,6 +701,8 @@ int ARENA_kernel1_accum(int start, int end, int param) {
 //    cout<<"rank "<<ARENA_local_rank<<" recv_X["<<param<<"]["<<i<<"] "<<recv_X[param][i]<<endl; 
 //    out0[start][i] += recv_X[param][i];
   }
+
+//  cout<<"[layer2 accu] rank "<<ARENA_local_rank<<" done layer2 accu opt_count: "<<opt_count<<"; local_nnz: "<<local_nnz<<endl;
 
   // start next layer
   if(opt_count == local_nnz) {
@@ -672,11 +768,11 @@ int main(int argc, char *argv[]) {
     cout<<"rank "<<ARENA_local_rank<<" success~"<<endl;
   } else {
     cout<<"rank "<<ARENA_local_rank<<" fail.."<<endl;
-//    display_output();
+    display_output();
   }
 
   // Output
-  if(ARENA_local_rank == NODES-1) {
+  if(ARENA_local_rank == 0) {
     cout<<"[final] rank "<<ARENA_local_rank<<" out0: "<<endl;
     for(int i=num_vertice/NODES-1; i<num_vertice/NODES; ++i) {
       cout<<"[ ";
@@ -741,15 +837,24 @@ void ARENA_load_data(int start, int end, float* buff) {
     flip = true;
   }
 
+  
+//  cout<<"[load] rank "<<ARENA_local_rank<<" trying to load cur_layer: "<<cur_layer<<"; cur_send_times: "<<cur_send_times<<endl;
   while(cur_send_times >= data_send_times[cur_row]) {
+//    cout<<"[load while] rank "<<ARENA_local_rank<<" trying to load cur_send_times: "<<cur_send_times<<"; cur_row: "<<cur_row<<"; data_send_times["<<cur_row<<"]: "<<data_send_times[cur_row]<<endl;
     cur_row += 1;
   }
+//  if(ARENA_local_rank==1)
+//  cout<<"[load] rank "<<ARENA_local_rank<<" ready load cur_row: "<<cur_row<<"; cur_send_times: "<<cur_send_times<<"; cur_layer: "<<cur_layer<<endl;
   for(int i=start; i<end; ++i) {
     buff[i] = temp_buff[cur_row][i];
-//    cout<<"buff["<<i<<"]: "<<buff[i]<<" ";
+//  if(ARENA_local_rank==1)
+//    cout<<"buff["<<cur_row<<"]["<<i<<"]: "<<buff[i]<<" ";
   }
+//  if(ARENA_local_rank==1)
 //  cout<<endl;
   cur_send_times += 1;
+//  if(ARENA_local_rank==1)
+//  cout<<"[load] rank "<<ARENA_local_rank<<" done loading cur_send_times: "<<cur_send_times<<"; data_send_times["<<cur_row<<"]: "<<data_send_times[cur_row]<<endl;
   if(cur_send_times == data_send_times[cur_row]) {
     cur_send_times = 0;
     cur_row += 1;
@@ -791,10 +896,16 @@ void ARENA_load_data(int start, int end, float* buff) {
 // TODO: user specified if necessary
 // ----------------------------------------------------------------------
 void ARENA_store_data(int start, int end, int source, float* buff) {
-  int offset = source*num_vertice/NODES + data_recv_times[source];
+//  if(ARENA_local_rank == 3)
+//  cout<<"[received] rank "<<ARENA_local_rank<<" from "<<source<<endl;
+//  int offset = source*num_vertice/NODES + data_recv_times[source];
   for(int i=start; i<end; ++i) {
     buff_X[i] = buff[i];
+//  if(ARENA_local_rank == 3)
+//    cout<<" "<<buff[i];
   }
+//  if(ARENA_local_rank == 3)
+//  cout<<endl;
 
 //    // local_X[i][k_dim] = buff[i];
 //    recv_X[offset][i] = buff[i];
@@ -810,7 +921,7 @@ void ARENA_store_data(int start, int end, int source, float* buff) {
 // helper functions (e.g., print out input/output, verify results)
 // ----------------------------------------------------------------------
 void display_input() {
-  if (ARENA_local_rank == NODES-1) { 
+  if (ARENA_local_rank != -1) { 
   cout<<"[init A] rank "<<ARENA_local_rank<<" : "<<num_vertice/NODES<<": "<<endl;
   for(int i=0; i<num_vertice/NODES; ++i) {
     cout<<"[ ";
@@ -868,6 +979,49 @@ void display_input() {
     cout<<global_bias1[j]<<" ";
   }
   cout<<" ]"<<endl;
+
+  cout<<"[init HiCOO local_V_HiCOO] rank "<<ARENA_local_rank<<" : "<<endl;
+  cout<<"[ ";
+  for(int i=0; i<local_nnz; ++i) {
+    cout<<local_V_HiCOO[i]<<" ";
+  }
+  cout<<" ]"<<endl;
+
+  cout<<"[init HiCOO local_COL_HiCOO] rank "<<ARENA_local_rank<<" : "<<endl;
+  cout<<"[ ";
+  for(int i=0; i<local_nnz; ++i) {
+    cout<<int(local_COL_HiCOO[i])<<" ";
+  }
+  cout<<" ]"<<endl;
+
+  cout<<"[init HiCOO local_BLK_COL_HiCOO] rank "<<ARENA_local_rank<<" : "<<endl;
+  cout<<"[ ";
+  for(int i=0; i<local_nnb; ++i) {
+    cout<<local_BLK_COL_HiCOO[i]<<" ";
+  }
+  cout<<" ]"<<endl;
+
+  cout<<"[init HiCOO local_BLK_ROW_HiCOO] rank "<<ARENA_local_rank<<" : "<<endl;
+  cout<<"[ ";
+  for(int i=0; i<local_nnb; ++i) {
+    cout<<local_BLK_ROW_HiCOO[i]<<" ";
+  }
+  cout<<" ]"<<endl;
+
+  cout<<"[init HiCOO local_BLK_SIZE_HiCOO] rank "<<ARENA_local_rank<<" : "<<endl;
+  cout<<"[ ";
+  for(int i=0; i<local_nnb; ++i) {
+    cout<<local_BLK_SIZE_HiCOO[i]<<" ";
+  }
+  cout<<" ]"<<endl;
+
+  cout<<"[init data_send_times] rank "<<ARENA_local_rank<<" : "<<endl;
+  cout<<"[ ";
+  for(int i=0; i<num_vertice/NODES; ++i) {
+    cout<<data_send_times[i]<<" ";
+  }
+  cout<<" ]"<<endl;
+
   }
 }
 

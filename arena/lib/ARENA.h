@@ -527,11 +527,12 @@ inline int ARENA_task_exec() {
 // Data value send.
 // -----------------------------------------------------------------------
 inline void ARENA_data_value_send() {
+
   if(ARENA_has_data_delivery and ARENA_target_end > ARENA_target_start and
      ARENA_target_end > -1   and ARENA_target_start > -1) {
     // Necessary data send
     for(int i=0; i<ARENA_nodes; ++i) {
-      if (i != ARENA_local_rank and ARENA_remote_ask_start[i] != -1) {
+      if (i != ARENA_local_rank and ARENA_remote_ask_start[i] != -1) {// and ARENA_target_more_end != ARENA_target_more_start) {
         int length = ARENA_remote_ask_end[i] - ARENA_remote_ask_start[i];
         ARENA_load_data(ARENA_remote_ask_start[i], ARENA_remote_ask_end[i], ARENA_remote_ask_buff[i]);
         ARENA_total_data_out += length;
