@@ -27,28 +27,33 @@ int main(int argc, char* argv[])
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
  
     // Create the window
-    int window_buffer = 0;
-    if(my_rank == 1)
-    {
-        window_buffer = 12345;
-    }
+    int data_size = 100;
+    int* window_buffer = new int[data_size];
+
     MPI_Win window;
-    MPI_Win_create(&window_buffer, sizeof(int), sizeof(int), MPI_INFO_NULL, MPI_COMM_WORLD, &window);
+    MPI_Win_create(window_buffer, data_size*sizeof(int), sizeof(int), MPI_INFO_NULL, MPI_COMM_WORLD, &window);
     MPI_Win_fence(0, window);
  
-    int value_fetched;
-    if(my_rank == 0)
-    {
-        // Fetch the value from the MPI process 1 window
-        MPI_Get(&value_fetched, 1, MPI_INT, 1, 0, 1, MPI_INT, window);
+    int* value_fetched = new int[data_size];
+    if(my_rank == 0) {
+      // Fetch the value from the MPI process 1 window
+      for(int i=0; i<data_size; ++i) {
+        MPI_Get(value_fetched+i, 1, MPI_INT, 1, i, 1, MPI_INT, window);
+      }
+    } else if(my_rank == 1) {
+       for(int i=0; i<data_size; ++i) {
+         window_buffer[i] = i;
+       }
     }
- 
+
     // Wait for the MPI_Get issued to complete before going any further
     MPI_Win_fence(0, window);
  
     if(my_rank == 0)
     {
-        printf("[MPI process 0] Value fetched from MPI process 1 window: %d.\n", value_fetched);
+      for(int i=0; i<data_size; ++i) {
+        printf("[MPI process 0] %dth Value fetched from MPI process 1 window: %d.\n", i, value_fetched[i]);
+      }
     }
  
     // Destroy the window
