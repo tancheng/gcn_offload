@@ -35,6 +35,7 @@
 #define ARENA_CONTINUE        0
 #define ARENA_TERMINATE       1
 #define ARENA_SPAWN_MAX       4096
+#define DATA_BUFF_SIZE        60000000
 
 using namespace std;
 
@@ -79,6 +80,7 @@ long int ARENA_total_task_out       = 0;
 map<int, int (*)(int, int, int)> ARENA_kernel_map;
 
 char buf[60000000];
+float* window_buffer;
 struct  ARENA_tag_struct {
   int id;
   int start;
@@ -118,8 +120,8 @@ inline void ARENA_init_data_buff(int);
 inline void ARENA_task_analyze();
 inline void ARENA_task_dispatch();
 inline void ARENA_task_spawn(int);
-inline void ARENA_data_value_send();
-inline void ARENA_data_value_recv();
+inline void ARENA_data_value_prepare(int, int, int);
+inline void ARENA_data_value_receive();
 inline void ARENA_fill_tag(ARENA_tag_struct);
 inline void ARENA_fill_terminate_tag();
 inline void ARENA_send_task_tag();
@@ -132,6 +134,8 @@ MPI_Status  status;
 MPI_Request request_task       = MPI_REQUEST_NULL;
 MPI_Request request_data_count = MPI_REQUEST_NULL;
 MPI_Request request_data_value = MPI_REQUEST_NULL;
+
+MPI_Win window;
 
 int flag_profile = 0;
 MPI_Status  status_profile;
@@ -170,19 +174,19 @@ inline int ARENA_run() {
     // Task dispatching and remote task enqueue
     ARENA_task_dispatch();
 
-    if(!ARENA_data_depend_task)
-      // Data send
-      ARENA_data_value_send();
+//    if(!ARENA_data_depend_task)
+//      // Data send
+//      ARENA_data_value_prepare();
 
     // Data receive if necessary
-    ARENA_data_value_recv();
+    ARENA_data_value_receive();
 
     // Task exec
     int param = ARENA_task_exec();
 
-    if(ARENA_data_depend_task)
-      // Data send
-      ARENA_data_value_send();
+//    if(ARENA_data_depend_task)
+//      // Data send
+//      ARENA_data_value_prepare();
 
     // Task spawn if necessary
     ARENA_task_spawn(param);
@@ -191,6 +195,8 @@ inline int ARENA_run() {
 #ifdef TIME
   chrono::system_clock::time_point end = chrono::system_clock::now();
 #endif
+
+  MPI_Win_fence(0, window);
 
   MPI_Finalize();
 
@@ -267,6 +273,11 @@ inline void ARENA_init_param() {
   }
 
   MPI_Buffer_attach(buf, 60000000);
+
+  window_buffer = new float[DATA_BUFF_SIZE];
+
+  MPI_Win_create(window_buffer, DATA_BUFF_SIZE*sizeof(float), sizeof(float), MPI_INFO_NULL, MPI_COMM_WORLD, &window);
+  MPI_Win_fence(0, window);
 
   // Init flags
   ARENA_skip_recv = false;
@@ -455,7 +466,7 @@ inline void ARENA_task_dispatch() {
 // -----------------------------------------------------------------------
 // Data receive if necessary.
 // -----------------------------------------------------------------------
-inline void ARENA_data_value_recv() {
+inline void ARENA_data_value_receive() {
   if(ARENA_has_data_delivery and ARENA_target_more_end != ARENA_target_more_start) {
     // Necessary data receive.
 
@@ -464,7 +475,11 @@ inline void ARENA_data_value_recv() {
     cout<<"[recving] rank "<<ARENA_local_rank<<" is waiting for receiving data from "<<ARENA_target_more_from<<endl;
 #endif
     ARENA_total_data_in += length;
-    MPI_Recv(ARENA_local_need_buff[ARENA_target_more_from], length, MPI_FLOAT, ARENA_target_more_from, 0, comm_world_data_value, MPI_STATUS_IGNORE);
+
+    MPI_Get(ARENA_local_need_buff[ARENA_target_more_from], length, MPI_FLOAT, ARENA_target_more_from, ARENA_target_more_start, length, MPI_FLOAT, window);
+
+//    MPI_Recv(ARENA_local_need_buff[ARENA_target_more_from], length, MPI_FLOAT, ARENA_target_more_from, 0, comm_world_data_value, MPI_STATUS_IGNORE);
+
 #ifdef DEBUG
     cout<<"[received] rank "<<ARENA_local_rank<<" received data from "<<ARENA_target_more_from<<" with length "<<length<<endl;
 #endif
@@ -520,30 +535,42 @@ inline int ARENA_task_exec() {
 // -----------------------------------------------------------------------
 // Data value send.
 // -----------------------------------------------------------------------
-inline void ARENA_data_value_send() {
-
-  if(ARENA_has_data_delivery and ARENA_target_end > ARENA_target_start and
-     ARENA_target_end > -1   and ARENA_target_start > -1) {
-    // Necessary data send
-    for(int i=0; i<ARENA_nodes; ++i) {
-      if (i != ARENA_local_rank and not ARENA_remote_ask_start[i].empty()) {// and ARENA_target_more_end != ARENA_target_more_start) {
-        int temp_start = ARENA_remote_ask_start[i].front();
-        int temp_end = ARENA_remote_ask_end[i].front();
-        ARENA_remote_ask_start[i].pop();
-        ARENA_remote_ask_end[i].pop();
-        int length = temp_end - temp_start;
-        ARENA_load_data(temp_start, temp_end, ARENA_remote_ask_buff[i]);
-        ARENA_total_data_out += length;
-        //MPI_Send(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value);//, &request_data_value);
-        MPI_Ibsend(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value, &request_data_value);
-        //MPI_Wait(&request_task, &status);
+inline void ARENA_data_value_prepare(int t_from, int t_start, int t_end) {
+  int length = t_end - t_start;
+  ARENA_load_data(t_start, t_end, window_buffer);
+  ARENA_total_data_out += length;
+  //MPI_Send(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value);//, &request_data_value);
+  //MPI_Ibsend(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value, &request_data_value);
+  //MPI_Wait(&request_task, &status);
 #ifdef DEBUG
-        cout<<"[isent data] rank "<<ARENA_local_rank<<" to "<<i<<" with length "<<length<<endl;
+  cout<<"[prepare data] rank "<<ARENA_local_rank<<" from "<<t_from<<" with length "<<length<<endl;
 #endif
-      }
-    }
-  }
 }
+
+//inline void ARENA_data_value_prepare() {
+//
+//  if(ARENA_has_data_delivery and ARENA_target_end > ARENA_target_start and
+//     ARENA_target_end > -1   and ARENA_target_start > -1) {
+//    // Necessary data send
+//    for(int i=0; i<ARENA_nodes; ++i) {
+//      if (i != ARENA_local_rank and not ARENA_remote_ask_start[i].empty()) {// and ARENA_target_more_end != ARENA_target_more_start) {
+//        int temp_start = ARENA_remote_ask_start[i].front();
+//        int temp_end = ARENA_remote_ask_end[i].front();
+//        ARENA_remote_ask_start[i].pop();
+//        ARENA_remote_ask_end[i].pop();
+//        int length = temp_end - temp_start;
+//        ARENA_load_data(temp_start, temp_end, ARENA_remote_ask_buff[i]);
+//        ARENA_total_data_out += length;
+//        //MPI_Send(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value);//, &request_data_value);
+//        MPI_Ibsend(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value, &request_data_value);
+//        //MPI_Wait(&request_task, &status);
+//#ifdef DEBUG
+//        cout<<"[isent data] rank "<<ARENA_local_rank<<" to "<<i<<" with length "<<length<<endl;
+//#endif
+//      }
+//    }
+//  }
+//}
 
 // -----------------------------------------------------------------------
 // Task spawn. Based on the ARENA_spawn that will be customized by user.
@@ -644,6 +671,10 @@ inline void ARENA_spawn_task(int t_id, int t_start, int t_end, int t_param,
     ARENA_spawn[ARENA_num_spawn].more_from  = t_more_from;
     ARENA_spawn[ARENA_num_spawn].more_start = t_more_start;
     ARENA_spawn[ARENA_num_spawn].more_end   = t_more_end;
+
+    if(t_more_end > t_more_start)
+      ARENA_data_value_prepare(t_more_from, t_more_start, t_more_end);
+
     ARENA_num_spawn++;
 }
 

@@ -26,12 +26,13 @@
 // Author : Cheng Tan
 //   Date : Jan 5, 2021
 
+#define DEBUG 
 #include "../lib/ARENA.h"
 #include <iostream>
 #include <fstream>
 #include <string>
 
-//#define DUMMY_DATA
+#define DUMMY_DATA
 
 #define KERNEL_LAYER0 2
 #define KERNEL_LAYER0_ACCUM 3
@@ -533,6 +534,7 @@ void mw1_kernel() {
 // ----------------------------------------------------------------------
 //int total_times = 0;
 int opt_count = 0;
+int global_start = 0;
 int ARENA_kernel0(int start, int end, int param) {
 
   // iterate across the value inside a specific row
@@ -566,9 +568,11 @@ int ARENA_kernel0(int start, int end, int param) {
 //        cout<<"rank "<<ARENA_local_rank<<" spawn remote task at row "<<row<<" for col "<<col<<" targeting node "<<dest<<" and send features dest: "<<dest<<endl;
         sent_tag[row][dest] = true;
         ARENA_spawn_task(KERNEL_LAYER0_ACCUM, col, col+1, 0,
-                         ARENA_local_rank, 0, num_feature);
-        ARENA_remote_ask_start[col/range].push(0);
-        ARENA_remote_ask_end[col/range].push(num_feature);
+                         ARENA_local_rank, global_start,
+                         global_start+num_feature);
+        global_start += num_feature;
+        // ARENA_remote_ask_start[col/range].push(0);
+        // ARENA_remote_ask_end[col/range].push(num_feature);
         //data_send_times[row] += 1;
       } else {
 //        cout<<"rank "<<ARENA_local_rank<<" spawn remote task at row "<<row<<" for col "<<col<<" targeting node "<<dest<<" and WITHOUT sending features; param: "<<param<<"; range: "<<range<<"; col/range: "<<col/range<<endl;
@@ -659,9 +663,11 @@ int ARENA_kernel1(int start, int end, int param) {
 //        cout<<"layer 1 rank "<<ARENA_local_rank<<" spawn remote task at row "<<param<<" from "<<local_COL[i]<<" to "<<local_COL[i]+1<<" and send features"<<endl;
         sent_tag[row][dest] = true;
         ARENA_spawn_task(KERNEL_LAYER1_ACCUM, col, col+1, 0,
-                         ARENA_local_rank, 0, num_w0_out);
-        ARENA_remote_ask_start[col/range].push(0);
-        ARENA_remote_ask_end[col/range].push(num_w0_out);
+                         ARENA_local_rank, global_start,
+                         global_start+num_w0_out);
+        global_start += num_w0_out;
+        // ARENA_remote_ask_start[col/range].push(0);
+        // ARENA_remote_ask_end[col/range].push(num_w0_out);
         //data_send_times[row] += 1;
       } else {
 //        cout<<"layer 1 rank "<<ARENA_local_rank<<" spawn remote task at row "<<param<<" from "<<local_COL[i]<<" to "<<local_COL[i]+1<<" WITHOUT send features"<<endl;
@@ -899,9 +905,9 @@ void ARENA_load_data(int start, int end, float* buff) {
 // ----------------------------------------------------------------------
 void ARENA_store_data(int start, int end, int source, float* buff) {
 //  if(ARENA_local_rank == 3)
-//  cout<<"[received] rank "<<ARENA_local_rank<<" from "<<source<<endl;
+  cout<<"[received] rank "<<ARENA_local_rank<<" from "<<source<<"; start: "<<start<<"; end: "<<end<<endl;
 //  int offset = source*num_vertice/NODES + data_recv_times[source];
-  for(int i=start; i<end; ++i) {
+  for(int i=0; i<end-start; ++i) {
     buff_X[i] = buff[i];
 //  if(ARENA_local_rank == 3)
 //    cout<<" "<<buff[i];
