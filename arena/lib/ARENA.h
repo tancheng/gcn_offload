@@ -127,7 +127,7 @@ inline void ARENA_fill_terminate_tag();
 inline void ARENA_send_task_tag();
 
 // MPI constants
-MPI_Comm    comm_world_data_value;
+//MPI_Comm    comm_world_data_value;
 //MPI_Comm    comm_world_data_count;
 //MPI_Group   world_group;
 MPI_Status  status;
@@ -237,7 +237,7 @@ inline void ARENA_init_param() {
   }
 
   // Init MPI
-  MPI_Comm_dup( MPI_COMM_WORLD, &comm_world_data_value );
+//  MPI_Comm_dup( MPI_COMM_WORLD, &comm_world_data_value );
  // MPI_Comm_group( comm_world_data_count, &world_group );
  // MPI_Comm_create_group( comm_world_data_count, world_group, 0, &comm_world_data_value );
 
@@ -476,7 +476,17 @@ inline void ARENA_data_value_receive() {
 #endif
     ARENA_total_data_in += length;
 
+    MPI_Win_lock(MPI_LOCK_EXCLUSIVE, ARENA_target_more_from, 0, window);
     MPI_Get(ARENA_local_need_buff[ARENA_target_more_from], length, MPI_FLOAT, ARENA_target_more_from, ARENA_target_more_start, length, MPI_FLOAT, window);
+    MPI_Win_unlock(ARENA_target_more_from, window);
+
+//    if(ARENA_local_rank == 0) {
+//      cout<<"[MPI_Get] rank 0 see what get from "<<ARENA_target_more_from<<" range ("<<ARENA_target_more_start<<" to "<<ARENA_target_more_start + length<<"): ";
+//      for (int i=0; i<length; ++i) {
+//        cout<<ARENA_local_need_buff[ARENA_target_more_from][i]<<" ";
+//      }
+//      cout<<endl;
+//    }
 
 //    MPI_Recv(ARENA_local_need_buff[ARENA_target_more_from], length, MPI_FLOAT, ARENA_target_more_from, 0, comm_world_data_value, MPI_STATUS_IGNORE);
 

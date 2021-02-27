@@ -26,13 +26,13 @@
 // Author : Cheng Tan
 //   Date : Jan 5, 2021
 
-#define DEBUG 
+//#define DEBUG 
 #include "../lib/ARENA.h"
 #include <iostream>
 #include <fstream>
 #include <string>
 
-#define DUMMY_DATA
+//#define DUMMY_DATA
 
 #define KERNEL_LAYER0 2
 #define KERNEL_LAYER0_ACCUM 3
@@ -152,6 +152,7 @@ void init_data() {
   for(int i=0; i<num_vertice; ++i) {
     global_X[i] = new float[num_feature];
     for(int j=0; j<num_feature; ++j) {
+      //global_X[i][j] = i + j;
       global_X[i][j] = i*num_feature + j;
     }
   }
@@ -606,6 +607,7 @@ int ARENA_kernel0_accum(int start, int end, int param) {
   ++opt_count;
 
   for(int i=0; i<num_feature; ++i) {
+//    if(ARENA_local_rank == 0)
 //    cout<<"[ACCU] rank "<<ARENA_local_rank<<" ready to REMOTE partial sum buff["<<i<<"]: "<<buff_X[i]<<" add to out0["<<start<<"]["<<i<<"]: "<<out0[start][i]<<endl;
 
 
@@ -749,6 +751,10 @@ void ARENA_init(int argc, char *argv[], int nodes) {
   for(int x=0; x<NODES; ++x) {
     ARENA_remote_ask_buff[x] = new float[num_feature];
     ARENA_local_need_buff[x] = new float[num_feature];
+    for(int i=0; i<num_feature; ++i) {
+      ARENA_remote_ask_buff[x][i] = -1;
+      ARENA_local_need_buff[x][i] = -1;
+    }
   }
 }
 
@@ -851,14 +857,14 @@ void ARENA_load_data(int start, int end, float* buff) {
 //    cout<<"[load while] rank "<<ARENA_local_rank<<" trying to load cur_send_times: "<<cur_send_times<<"; cur_row: "<<cur_row<<"; data_send_times["<<cur_row<<"]: "<<data_send_times[cur_row]<<endl;
     cur_row += 1;
   }
-//  if(ARENA_local_rank==1)
+//  if(ARENA_local_rank!=0)
 //  cout<<"[load] rank "<<ARENA_local_rank<<" ready load cur_row: "<<cur_row<<"; cur_send_times: "<<cur_send_times<<"; cur_layer: "<<cur_layer<<endl;
   for(int i=start; i<end; ++i) {
-    buff[i] = temp_buff[cur_row][i];
-//  if(ARENA_local_rank==1)
-//    cout<<"buff["<<cur_row<<"]["<<i<<"]: "<<buff[i]<<" ";
+    buff[i] = temp_buff[cur_row][i-start];
+//  if(ARENA_local_rank!=0)
+//    cout<<"window_buffer["<<i<<"]: "<<buff[i]<<" ";
   }
-//  if(ARENA_local_rank==1)
+//  if(ARENA_local_rank!=0)
 //  cout<<endl;
   cur_send_times += 1;
 //  if(ARENA_local_rank==1)
@@ -904,15 +910,17 @@ void ARENA_load_data(int start, int end, float* buff) {
 // TODO: user specified if necessary
 // ----------------------------------------------------------------------
 void ARENA_store_data(int start, int end, int source, float* buff) {
-//  if(ARENA_local_rank == 3)
-  cout<<"[received] rank "<<ARENA_local_rank<<" from "<<source<<"; start: "<<start<<"; end: "<<end<<endl;
+//  if(ARENA_local_rank == 0)
+//  cout<<"[received] rank "<<ARENA_local_rank<<" from "<<source<<"; start: "<<start<<"; end: "<<end<<endl;
 //  int offset = source*num_vertice/NODES + data_recv_times[source];
   for(int i=0; i<end-start; ++i) {
     buff_X[i] = buff[i];
 //  if(ARENA_local_rank == 3)
+//  if(ARENA_local_rank == 0)
 //    cout<<" "<<buff[i];
   }
 //  if(ARENA_local_rank == 3)
+//  if(ARENA_local_rank == 0)
 //  cout<<endl;
 
 //    // local_X[i][k_dim] = buff[i];

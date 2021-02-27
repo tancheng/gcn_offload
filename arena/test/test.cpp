@@ -16,9 +16,9 @@ int main(int argc, char* argv[])
     // Check that only 2 MPI processes are spawn
     int comm_size;
     MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
-    if(comm_size != 2)
+    if(comm_size != 4)
     {
-        printf("This application is meant to be run with 2 MPI processes, not %d.\n", comm_size);
+        printf("This application is meant to be run with 4 MPI processes, not %d.\n", comm_size);
         MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
  
@@ -35,12 +35,13 @@ int main(int argc, char* argv[])
     MPI_Win_fence(0, window);
  
     int* value_fetched = new int[data_size];
-    if(my_rank == 0) {
+    for(int i=0; i<data_size; ++i) {
+      value_fetched[i] = -1;
+    }
+    if(my_rank != 0) {
       // Fetch the value from the MPI process 1 window
-      for(int i=0; i<data_size; ++i) {
-        MPI_Get(value_fetched+i, 1, MPI_INT, 1, i, 1, MPI_INT, window);
-      }
-    } else if(my_rank == 1) {
+      MPI_Get(value_fetched+my_rank*25, 25, MPI_INT, 0, my_rank*25, 25, MPI_INT, window);
+    } else if(my_rank == 0) {
        for(int i=0; i<data_size; ++i) {
          window_buffer[i] = i;
        }
@@ -49,10 +50,10 @@ int main(int argc, char* argv[])
     // Wait for the MPI_Get issued to complete before going any further
     MPI_Win_fence(0, window);
  
-    if(my_rank == 0)
+    if(my_rank != 0)
     {
-      for(int i=0; i<data_size; ++i) {
-        printf("[MPI process 0] %dth Value fetched from MPI process 1 window: %d.\n", i, value_fetched[i]);
+      for(int i=my_rank*25; i<my_rank*25+25; ++i) {
+        printf("[MPI process %d] %dth Value fetched from MPI process 0 window: %d.\n", my_rank, i, value_fetched[i]);
       }
     }
  
