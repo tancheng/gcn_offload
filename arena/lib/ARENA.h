@@ -31,7 +31,7 @@
 #define ARENA_TAG_PARAM       3
 #define ARENA_TAG_MORE_FROM   4
 #define ARENA_TAG_MORE_START  5
-#define ARENA_TAG_MORE_END    6
+#define ARENA_TAG_MORE_LENGTH 6
 #define ARENA_CONTINUE        0
 #define ARENA_TERMINATE       1
 #define ARENA_SPAWN_MAX       4096
@@ -42,44 +42,41 @@ using namespace std;
 // -----------------------------------------------------------------------
 // ARENA task struc
 // -----------------------------------------------------------------------
-int      ARENA_nodes;
-int      ARENA_root_task_id = -1;
-int      ARENA_local_rank;
-int      ARENA_local_start;
-int      ARENA_local_end;
-int      ARENA_local_bound;
-int      ARENA_target_id;
-int      ARENA_target_start;
-int      ARENA_target_end;
-int      ARENA_target_param;
-int      ARENA_target_more_from;
-int      ARENA_target_more_start;
-int      ARENA_target_more_end;
-int      ARENA_remote_start;
-int      ARENA_remote_end;
-int      ARENA_tag[ARENA_TAG_SIZE];
-int      ARENA_global_start;
-int      ARENA_global_end;
-int      ARENA_global_param;
-queue<int>* ARENA_remote_ask_start;
-queue<int>* ARENA_remote_ask_end;
-float** ARENA_remote_ask_buff;
-float** ARENA_local_need_buff;
-void     ARENA_load_data(int, int, float*);
-void     ARENA_store_data(int, int, int, float*);
-bool     ARENA_encounter_terminator = false;
-bool     ARENA_sent_task            = false;
-int      ARENA_terminate_count      = ARENA_TERMINATE_TRH;
-bool     ARENA_has_data_delivery    = false;
-bool     ARENA_data_depend_task     = false;
-bool     ARENA_skip_recv            = false;
-long int ARENA_total_data_in        = 0;
-long int ARENA_total_data_out       = 0;
-long int ARENA_total_task_in        = 0;
-long int ARENA_total_task_out       = 0;
+int         ARENA_nodes;
+int         ARENA_root_task_id = -1;
+int         ARENA_local_rank;
+int         ARENA_local_start;
+int         ARENA_local_end;
+int         ARENA_local_bound;
+int         ARENA_target_id;
+int         ARENA_target_start;
+int         ARENA_target_end;
+int         ARENA_target_param;
+int         ARENA_target_more_from;
+int         ARENA_target_more_start;
+int         ARENA_target_more_length;
+int         ARENA_remote_start;
+int         ARENA_remote_end;
+int         ARENA_tag[ARENA_TAG_SIZE];
+int         ARENA_global_start;
+int         ARENA_global_end;
+int         ARENA_global_param;
+float**     ARENA_local_need_buff;
+float*      ARENA_recv_data_buffer;
+void        ARENA_load_data(int, int, float*);
+void        ARENA_store_data(int, int, int, float*);
+bool        ARENA_encounter_terminator = false;
+bool        ARENA_sent_task            = false;
+int         ARENA_terminate_count      = ARENA_TERMINATE_TRH;
+bool        ARENA_has_data_delivery    = false;
+bool        ARENA_data_depend_task     = false;
+bool        ARENA_skip_recv            = false;
+long int    ARENA_total_data_in        = 0;
+long int    ARENA_total_data_out       = 0;
+long int    ARENA_total_task_in        = 0;
+long int    ARENA_total_task_out       = 0;
 map<int, int (*)(int, int, int)> ARENA_kernel_map;
 
-char buf[60000000];
 float* window_buffer;
 struct  ARENA_tag_struct {
   int id;
@@ -88,22 +85,22 @@ struct  ARENA_tag_struct {
   int param;
   int more_from;
   int more_start;
-  int more_end;
+  int more_length;
   ARENA_tag_struct(){}
   ARENA_tag_struct(int* tag)
     : id(tag[0]),  start(tag[1]),
       end(tag[2]), param(tag[3]),
       more_from(tag[4]),
       more_start(tag[5]),
-      more_end(tag[6]){}
+      more_length(tag[6]){}
   ARENA_tag_struct(int id,  int start,
                    int end, int param,
                    int more_from,
                    int more_start,
-                   int more_end)
+                   int more_length)
     : id(id), start(start), end(end), param(param),
       more_from(more_from), more_start(more_start),
-      more_end(more_end){}
+      more_length(more_length){}
 };
 queue<ARENA_tag_struct> ARENA_recv_list;
 queue<ARENA_tag_struct> ARENA_send_list;
@@ -116,7 +113,7 @@ int  ARENA_kernel1(int, int, int);
 inline int  ARENA_task_arrive();
 inline int  ARENA_task_exec();
 inline void ARENA_init_param();
-inline void ARENA_init_data_buff(int);
+inline void ARENA_init_data_buff();
 inline void ARENA_task_analyze();
 inline void ARENA_task_dispatch();
 inline void ARENA_task_spawn(int);
@@ -244,35 +241,33 @@ inline void ARENA_init_param() {
   // Init root task
   if(ARENA_local_rank == 0) {
 
-    ARENA_tag[ARENA_TAG_TASK]       = ARENA_TERMINATE_TASK;
-    ARENA_tag[ARENA_TAG_PARAM]      = -1;
-    ARENA_tag[ARENA_TAG_START]      = -1;
-    ARENA_tag[ARENA_TAG_END]        = -1;
-    ARENA_tag[ARENA_TAG_MORE_FROM]  = -1;
-    ARENA_tag[ARENA_TAG_MORE_START] = -1;
-    ARENA_tag[ARENA_TAG_MORE_END]   = -1;
+    ARENA_tag[ARENA_TAG_TASK]        = ARENA_TERMINATE_TASK;
+    ARENA_tag[ARENA_TAG_PARAM]       = -1;
+    ARENA_tag[ARENA_TAG_START]       = -1;
+    ARENA_tag[ARENA_TAG_END]         = -1;
+    ARENA_tag[ARENA_TAG_MORE_FROM]   = -1;
+    ARENA_tag[ARENA_TAG_MORE_START]  = -1;
+    ARENA_tag[ARENA_TAG_MORE_LENGTH] = -1;
     ARENA_tag_struct terminate_tag(ARENA_tag);
     ARENA_recv_list.push(terminate_tag);
 
-    ARENA_target_start              = ARENA_global_start;
-    ARENA_target_end                = ARENA_global_end;
+    ARENA_target_start               = ARENA_global_start;
+    ARENA_target_end                 = ARENA_global_end;
 
     if(ARENA_root_task_id != -1)
-      ARENA_tag[ARENA_TAG_TASK]       = ARENA_root_task_id;
+      ARENA_tag[ARENA_TAG_TASK]      = ARENA_root_task_id;
     else
-      ARENA_tag[ARENA_TAG_TASK]       = ARENA_NORMAL_TASK;
+      ARENA_tag[ARENA_TAG_TASK]      = ARENA_NORMAL_TASK;
 
-    ARENA_tag[ARENA_TAG_PARAM]      = ARENA_global_param;
-    ARENA_tag[ARENA_TAG_START]      = ARENA_target_start;
-    ARENA_tag[ARENA_TAG_END]        = ARENA_target_end;
-    ARENA_tag[ARENA_TAG_MORE_FROM]  = -1;
-    ARENA_tag[ARENA_TAG_MORE_START] = -1;
-    ARENA_tag[ARENA_TAG_MORE_END]   = -1;
+    ARENA_tag[ARENA_TAG_PARAM]       = ARENA_global_param;
+    ARENA_tag[ARENA_TAG_START]       = ARENA_target_start;
+    ARENA_tag[ARENA_TAG_END]         = ARENA_target_end;
+    ARENA_tag[ARENA_TAG_MORE_FROM]   = -1;
+    ARENA_tag[ARENA_TAG_MORE_START]  = -1;
+    ARENA_tag[ARENA_TAG_MORE_LENGTH] = -1;
     ARENA_tag_struct recv_tag(ARENA_tag);
     ARENA_recv_list.push(recv_tag);
   }
-
-  MPI_Buffer_attach(buf, 60000000);
 
   window_buffer = new float[DATA_BUFF_SIZE];
 
@@ -283,36 +278,22 @@ inline void ARENA_init_param() {
   ARENA_skip_recv = false;
   ARENA_sent_task = false;
 
-  // Register default kernel
-//  ARENA_kernel_map[ARENA_NORMAL_TASK] = &ARENA_kernel;
+  ARENA_init_data_buff();
 }
-
+ 
 // -----------------------------------------------------------------------
 // Initialize data requirement buffer. The buffer is only initialized if
 // necessary.
 // -----------------------------------------------------------------------
-inline void ARENA_init_data_buff(int buff_size, bool depend) {
-  if(buff_size <= 0) return;
-  ARENA_data_depend_task = depend;
+inline void ARENA_init_data_buff() {
+  ARENA_data_depend_task = true;
   ARENA_has_data_delivery = true;
 
-  ARENA_remote_ask_start = new queue<int>[ARENA_nodes];
-  ARENA_remote_ask_end   = new queue<int>[ARENA_nodes];
-  ARENA_remote_ask_buff  = new float*[ARENA_nodes];
   ARENA_local_need_buff  = new float*[ARENA_nodes];
-//  for(int i=0; i<ARENA_nodes; ++i) {
-//    ARENA_remote_ask_start[i] = -1;
-//    ARENA_remote_ask_end[i]   = -1;
-//  }
 
-//  for(int i=0; i<ARENA_nodes; ++i) {
-//    ARENA_remote_ask_buff[i] = new float[buff_size*(i+1)];
-//    ARENA_local_need_buff[i] = new float[buff_size*(i+1)];
-//    for(int j=0; j<buff_size; ++j) {
-//      ARENA_remote_ask_buff[i][j] = -1;
-//      ARENA_local_need_buff[i][j] = -1;
-//    }
-//  }
+  for(int x=0; x<ARENA_nodes; ++x) {
+    ARENA_local_need_buff[x] = new float[DATA_BUFF_SIZE];
+  }
 }
 
 // -----------------------------------------------------------------------
@@ -375,14 +356,14 @@ inline int ARENA_task_arrive() {
 // -----------------------------------------------------------------------
 inline void ARENA_task_analyze() {
 
-  ARENA_remote_start      = -1;
-  ARENA_remote_end        = -1;
-  ARENA_target_id         = -1;
-  ARENA_target_start      = -1;
-  ARENA_target_end        = -1;
-  ARENA_target_more_from  = -1;
-  ARENA_target_more_start = -1;
-  ARENA_target_more_end   = -1;
+  ARENA_remote_start       = -1;
+  ARENA_remote_end         = -1;
+  ARENA_target_id          = -1;
+  ARENA_target_start       = -1;
+  ARENA_target_end         = -1;
+  ARENA_target_more_from   = -1;
+  ARENA_target_more_start  = -1;
+  ARENA_target_more_length = 0;
 
   if(ARENA_tag[ARENA_TAG_END] > ARENA_local_end) {
     ARENA_remote_end = ARENA_tag[ARENA_TAG_END];
@@ -411,9 +392,9 @@ inline void ARENA_task_analyze() {
 
   if(ARENA_target_end > ARENA_target_start and ARENA_target_start > -1 and
      ARENA_target_end > -1) {
-    ARENA_target_more_from  = ARENA_tag[ARENA_TAG_MORE_FROM];
-    ARENA_target_more_start = ARENA_tag[ARENA_TAG_MORE_START];
-    ARENA_target_more_end   = ARENA_tag[ARENA_TAG_MORE_END];
+    ARENA_target_more_from   = ARENA_tag[ARENA_TAG_MORE_FROM];
+    ARENA_target_more_start  = ARENA_tag[ARENA_TAG_MORE_START];
+    ARENA_target_more_length = ARENA_tag[ARENA_TAG_MORE_LENGTH];
   }
   ARENA_target_param = ARENA_tag[ARENA_TAG_PARAM];
 }
@@ -467,17 +448,16 @@ inline void ARENA_task_dispatch() {
 // Data receive if necessary.
 // -----------------------------------------------------------------------
 inline void ARENA_data_value_receive() {
-  if(ARENA_has_data_delivery and ARENA_target_more_end != ARENA_target_more_start) {
+  if(ARENA_has_data_delivery and ARENA_target_more_length > 0) {
     // Necessary data receive.
 
-    int length = ARENA_target_more_end - ARENA_target_more_start;
 #ifdef DEBUG
     cout<<"[recving] rank "<<ARENA_local_rank<<" is waiting for receiving data from "<<ARENA_target_more_from<<endl;
 #endif
-    ARENA_total_data_in += length;
+    ARENA_total_data_in += ARENA_target_more_length;
 
     MPI_Win_lock(MPI_LOCK_EXCLUSIVE, ARENA_target_more_from, 0, window);
-    MPI_Get(ARENA_local_need_buff[ARENA_target_more_from], length, MPI_FLOAT, ARENA_target_more_from, ARENA_target_more_start, length, MPI_FLOAT, window);
+    MPI_Get(ARENA_local_need_buff[ARENA_target_more_from], ARENA_target_more_length, MPI_FLOAT, ARENA_target_more_from, ARENA_target_more_start, ARENA_target_more_length, MPI_FLOAT, window);
     MPI_Win_unlock(ARENA_target_more_from, window);
 
 //    if(ARENA_local_rank == 0) {
@@ -491,11 +471,12 @@ inline void ARENA_data_value_receive() {
 //    MPI_Recv(ARENA_local_need_buff[ARENA_target_more_from], length, MPI_FLOAT, ARENA_target_more_from, 0, comm_world_data_value, MPI_STATUS_IGNORE);
 
 #ifdef DEBUG
-    cout<<"[received] rank "<<ARENA_local_rank<<" received data from "<<ARENA_target_more_from<<" with length "<<length<<endl;
+    cout<<"[received] rank "<<ARENA_local_rank<<" received data from "<<ARENA_target_more_from<<" with length "<<ARENA_target_more_length<<endl;
 #endif
-    ARENA_store_data(ARENA_target_more_start, ARENA_target_more_end, ARENA_target_more_from, ARENA_local_need_buff[ARENA_target_more_from]);
+//    ARENA_store_data(ARENA_target_more_start, ARENA_target_more_length, ARENA_target_more_from, ARENA_local_need_buff[ARENA_target_more_from]);
+   ARENA_recv_data_buffer = ARENA_local_need_buff[ARENA_target_more_from];
 #ifdef DEBUG
-    cout<<"[stored data] rank "<<ARENA_local_rank<<" from "<<ARENA_target_more_from<<" with length "<<length<<endl;
+    cout<<"[stored data] rank "<<ARENA_local_rank<<" from "<<ARENA_target_more_from<<" with length "<<ARENA_target_more_length<<endl;
 #endif
 
 //    for(int i=0; i<ARENA_nodes; ++i) {
@@ -545,16 +526,21 @@ inline int ARENA_task_exec() {
 // -----------------------------------------------------------------------
 // Data value send.
 // -----------------------------------------------------------------------
-inline void ARENA_data_value_prepare(int t_from, int t_start, int t_end) {
-  int length = t_end - t_start;
-  ARENA_load_data(t_start, t_end, window_buffer);
-  ARENA_total_data_out += length;
+int ARENA_local_window_pos = 0;
+inline int ARENA_data_value_prepare(int t_from, float* t_start, int t_length) {
+//  ARENA_load_data(t_start, t_length, window_buffer);
+  for(int i=0; i<t_length; ++i) {
+    window_buffer[ARENA_local_window_pos] = *(t_start+i);
+    ARENA_local_window_pos += 1;
+  }
+  ARENA_total_data_out += t_length;
   //MPI_Send(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value);//, &request_data_value);
   //MPI_Ibsend(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value, &request_data_value);
   //MPI_Wait(&request_task, &status);
 #ifdef DEBUG
-  cout<<"[prepare data] rank "<<ARENA_local_rank<<" from "<<t_from<<" with length "<<length<<endl;
+  cout<<"[prepare data] rank "<<ARENA_local_rank<<" from "<<t_from<<" with length "<<t_length<<endl;
 #endif
+  return ARENA_local_window_pos - t_length;
 }
 
 //inline void ARENA_data_value_prepare() {
@@ -629,26 +615,26 @@ inline void ARENA_task_spawn(int new_spawn_count) {
 // requirements are also embedded inside the tag format.
 // -----------------------------------------------------------------------
 inline void ARENA_fill_tag(ARENA_tag_struct t_tag) {
-  ARENA_tag[ARENA_TAG_TASK]       = t_tag.id;
-  ARENA_tag[ARENA_TAG_START]      = t_tag.start;
-  ARENA_tag[ARENA_TAG_END]        = t_tag.end;
-  ARENA_tag[ARENA_TAG_PARAM]      = t_tag.param;
-  ARENA_tag[ARENA_TAG_MORE_FROM]  = t_tag.more_from;
-  ARENA_tag[ARENA_TAG_MORE_START] = t_tag.more_start;
-  ARENA_tag[ARENA_TAG_MORE_END]   = t_tag.more_end;
+  ARENA_tag[ARENA_TAG_TASK]        = t_tag.id;
+  ARENA_tag[ARENA_TAG_START]       = t_tag.start;
+  ARENA_tag[ARENA_TAG_END]         = t_tag.end;
+  ARENA_tag[ARENA_TAG_PARAM]       = t_tag.param;
+  ARENA_tag[ARENA_TAG_MORE_FROM]   = t_tag.more_from;
+  ARENA_tag[ARENA_TAG_MORE_START]  = t_tag.more_start;
+  ARENA_tag[ARENA_TAG_MORE_LENGTH] = t_tag.more_length;
 }
 
 // -----------------------------------------------------------------------
 // Create a terminate task tag.
 // -----------------------------------------------------------------------
 inline void ARENA_fill_terminate_tag() {
-  ARENA_tag[ARENA_TAG_TASK]       = ARENA_TERMINATE_TASK;
-  ARENA_tag[ARENA_TAG_START]      = -1;
-  ARENA_tag[ARENA_TAG_END]        = -1;
-  ARENA_tag[ARENA_TAG_PARAM]      = -1;
-  ARENA_tag[ARENA_TAG_MORE_FROM]  = -1;
-  ARENA_tag[ARENA_TAG_MORE_START] = -1;
-  ARENA_tag[ARENA_TAG_MORE_END]   = -1;
+  ARENA_tag[ARENA_TAG_TASK]        = ARENA_TERMINATE_TASK;
+  ARENA_tag[ARENA_TAG_START]       = -1;
+  ARENA_tag[ARENA_TAG_END]         = -1;
+  ARENA_tag[ARENA_TAG_PARAM]       = -1;
+  ARENA_tag[ARENA_TAG_MORE_FROM]   = -1;
+  ARENA_tag[ARENA_TAG_MORE_START]  = -1;
+  ARENA_tag[ARENA_TAG_MORE_LENGTH] = -1;
 }
 
 // -----------------------------------------------------------------------
@@ -673,29 +659,31 @@ inline void ARENA_send_task_tag() {
 // Spawn a task.
 // -----------------------------------------------------------------------
 inline void ARENA_spawn_task(int t_id, int t_start, int t_end, int t_param,
-                             int t_more_from, int t_more_start, int t_more_end) {
-    ARENA_spawn[ARENA_num_spawn].id         = t_id;
-    ARENA_spawn[ARENA_num_spawn].start      = t_start;
-    ARENA_spawn[ARENA_num_spawn].end        = t_end;
-    ARENA_spawn[ARENA_num_spawn].param      = t_param;
-    ARENA_spawn[ARENA_num_spawn].more_from  = t_more_from;
-    ARENA_spawn[ARENA_num_spawn].more_start = t_more_start;
-    ARENA_spawn[ARENA_num_spawn].more_end   = t_more_end;
+                             int t_more_from, float* t_more_start, int t_more_length) {
+    ARENA_spawn[ARENA_num_spawn].id          = t_id;
+    ARENA_spawn[ARENA_num_spawn].start       = t_start;
+    ARENA_spawn[ARENA_num_spawn].end         = t_end;
+    ARENA_spawn[ARENA_num_spawn].param       = t_param;
+    ARENA_spawn[ARENA_num_spawn].more_from   = t_more_from;
 
-    if(t_more_end > t_more_start)
-      ARENA_data_value_prepare(t_more_from, t_more_start, t_more_end);
+    int window_pos = 0;
+    if(t_more_length > 0)
+      window_pos = ARENA_data_value_prepare(t_more_from, t_more_start, t_more_length);
+
+    ARENA_spawn[ARENA_num_spawn].more_start  = window_pos;
+    ARENA_spawn[ARENA_num_spawn].more_length = t_more_length;
 
     ARENA_num_spawn++;
 }
 
 inline void ARENA_spawn_task(int t_id, int t_start, int t_end, int t_param) {
-    ARENA_spawn[ARENA_num_spawn].id         = t_id;
-    ARENA_spawn[ARENA_num_spawn].start      = t_start;
-    ARENA_spawn[ARENA_num_spawn].end        = t_end;
-    ARENA_spawn[ARENA_num_spawn].param      = t_param;
-    ARENA_spawn[ARENA_num_spawn].more_from  = -1;
-    ARENA_spawn[ARENA_num_spawn].more_start = -1;
-    ARENA_spawn[ARENA_num_spawn].more_end   = -1;
+    ARENA_spawn[ARENA_num_spawn].id          = t_id;
+    ARENA_spawn[ARENA_num_spawn].start       = t_start;
+    ARENA_spawn[ARENA_num_spawn].end         = t_end;
+    ARENA_spawn[ARENA_num_spawn].param       = t_param;
+    ARENA_spawn[ARENA_num_spawn].more_from   = -1;
+    ARENA_spawn[ARENA_num_spawn].more_start  = -1;
+    ARENA_spawn[ARENA_num_spawn].more_length = -1;
     ARENA_num_spawn++;
 }
 
