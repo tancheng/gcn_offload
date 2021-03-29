@@ -6,11 +6,15 @@
 //
 // Author : Cheng Tan
 //   Date : March 18, 2020
+//
+//   @xiec add tracing function
 
 #include "mpi.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
+#include <fstream>
+#include <string>
 #include <map>
 #include <queue>
 #include <chrono>
@@ -21,8 +25,8 @@
 //#define DATAMOVEMENT
 
 #define ARENA_NO_TASK        -1
-#define ARENA_TERMINATE_TASK  0
-#define ARENA_NORMAL_TASK     1
+#define ARENA_TERMINATE_TASK -2
+#define ARENA_NORMAL_TASK    -3
 #define ARENA_TAG_SIZE        7
 #define ARENA_TERMINATE_TRH   1
 #define ARENA_TAG_TASK        0
@@ -47,7 +51,6 @@ int         ARENA_root_task_id = -1;
 int         ARENA_local_rank;
 int         ARENA_local_start;
 int         ARENA_local_end;
-int         ARENA_local_bound;
 int         ARENA_target_id;
 int         ARENA_target_start;
 int         ARENA_target_end;
@@ -58,9 +61,10 @@ int         ARENA_target_more_length;
 int         ARENA_remote_start;
 int         ARENA_remote_end;
 int         ARENA_tag[ARENA_TAG_SIZE];
-int         ARENA_global_start;
-int         ARENA_global_end;
-int         ARENA_global_param;
+int         ARENA_root_start;
+int         ARENA_root_end;
+int         ARENA_root_param;
+int         ARENA_num_spawn = 0;
 float**     ARENA_local_need_buff;
 float*      ARENA_recv_data_buffer;
 void        ARENA_load_data(int, int, float*);
@@ -75,7 +79,7 @@ long int    ARENA_total_data_in        = 0;
 long int    ARENA_total_data_out       = 0;
 long int    ARENA_total_task_in        = 0;
 long int    ARENA_total_task_out       = 0;
-map<int, int (*)(int, int, int)> ARENA_kernel_map;
+map<int, void (*)(int, int, int, bool, int)> ARENA_kernel_map;
 
 float* window_buffer;
 struct  ARENA_tag_struct {
@@ -108,16 +112,15 @@ queue<ARENA_tag_struct> ARENA_spawn_list;
 ARENA_tag_struct* ARENA_spawn;
 
 // ARENA helper functions
-int  ARENA_kernel(int, int, int);
-int  ARENA_kernel1(int, int, int);
+inline int  ARENA_init(int, char*, int);
 inline int  ARENA_task_arrive();
-inline int  ARENA_task_exec();
+inline void ARENA_task_exec();
 inline void ARENA_init_param();
 inline void ARENA_init_data_buff();
 inline void ARENA_task_analyze();
 inline void ARENA_task_dispatch();
-inline void ARENA_task_spawn(int);
-inline void ARENA_data_value_prepare(int, int, int);
+inline void ARENA_task_issue();
+inline void ARENA_data_value_prepare(int, int);
 inline void ARENA_data_value_receive();
 inline void ARENA_fill_tag(ARENA_tag_struct);
 inline void ARENA_fill_terminate_tag();
@@ -137,6 +140,66 @@ MPI_Win window;
 int flag_profile = 0;
 MPI_Status  status_profile;
 MPI_Request request_profile = MPI_REQUEST_NULL;
+
+//#define TRACE
+#define RECV 0
+#define SEND 1
+#define EXEC 2
+#define SPAW 3
+#define DATA 0
+#define TASK 1
+
+//trace function
+string trace_filename = "arena.out";
+int ARENA_task_latency = 100;
+int ARENA_task_size = 32;
+
+void traceout(int local_rank, int isSend, bool isTask,int taskcycle, int remote_rank, int size){     
+
+      string SorR, TorD;
+      if (isTask) TorD = "Task";
+      else TorD = "Data";
+      switch(isSend){
+      case SEND: {
+        SorR = "Send";
+        break;
+        }
+       case RECV: {
+        SorR = "Recv";
+        break;
+        }
+       case EXEC: {
+        SorR = "Exec";
+        break;
+        }
+       case SPAW: {
+        SorR = "Spaw";
+        break;
+        } 
+        
+      }
+      
+      fstream fout;
+      string filename = trace_filename;
+      filename.append(".");
+      filename.append(to_string(local_rank));
+      fout.open(filename, ios::out | ios::app);
+      fout << local_rank << " " << SorR << " " << TorD <<  " " << taskcycle <<  " " <<remote_rank << " " << size << "\n";
+      
+      fout.close();
+}
+
+inline int ARENA_init(int nodes) {
+  // MPI initial
+  int rank;
+  //MPI_Init(&argc, &argv);
+  MPI_Init(NULL, NULL);
+  MPI_Comm_size(MPI_COMM_WORLD, &ARENA_nodes);
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  //ARENA_nodes = nodes;
+  ARENA_local_rank = rank;
+  return rank;
+}
 
 // =======================================================================
 // ARENA programming model busy waiting kernel.
@@ -179,14 +242,14 @@ inline int ARENA_run() {
     ARENA_data_value_receive();
 
     // Task exec
-    int param = ARENA_task_exec();
+    ARENA_task_exec();
 
 //    if(ARENA_data_depend_task)
 //      // Data send
 //      ARENA_data_value_prepare();
 
-    // Task spawn if necessary
-    ARENA_task_spawn(param);
+    // Issue the spawned tasks if necessary
+    ARENA_task_issue();
   }
 
 #ifdef TIME
@@ -215,11 +278,21 @@ inline int ARENA_run() {
 // -----------------------------------------------------------------------
 // Register ARENA param.
 // -----------------------------------------------------------------------
-inline void ARENA_register(int t_TAG, int (*t_kernel)(int, int, int), bool t_root) {
+inline void ARENA_register_task(int t_TAG, void (*t_kernel)(int, int, int, bool, int), 
+                           bool t_root=false, int t_start = 0, int t_end = 0,
+                           int t_param = -1) {
   if(t_root) {
     ARENA_root_task_id = t_TAG;
+    ARENA_root_start   = t_start;
+    ARENA_root_end     = t_end;
+    ARENA_root_param   = t_param;
   }
   ARENA_kernel_map[t_TAG] = t_kernel;
+}
+
+inline void ARENA_set_local(int t_start, int t_end) {
+  ARENA_local_start = t_start;
+  ARENA_local_end   = t_end;
 }
 
 // -----------------------------------------------------------------------
@@ -251,15 +324,15 @@ inline void ARENA_init_param() {
     ARENA_tag_struct terminate_tag(ARENA_tag);
     ARENA_recv_list.push(terminate_tag);
 
-    ARENA_target_start               = ARENA_global_start;
-    ARENA_target_end                 = ARENA_global_end;
+    ARENA_target_start               = ARENA_root_start;
+    ARENA_target_end                 = ARENA_root_end;
 
     if(ARENA_root_task_id != -1)
       ARENA_tag[ARENA_TAG_TASK]      = ARENA_root_task_id;
     else
       ARENA_tag[ARENA_TAG_TASK]      = ARENA_NORMAL_TASK;
 
-    ARENA_tag[ARENA_TAG_PARAM]       = ARENA_global_param;
+    ARENA_tag[ARENA_TAG_PARAM]       = ARENA_root_param;
     ARENA_tag[ARENA_TAG_START]       = ARENA_target_start;
     ARENA_tag[ARENA_TAG_END]         = ARENA_target_end;
     ARENA_tag[ARENA_TAG_MORE_FROM]   = -1;
@@ -267,6 +340,11 @@ inline void ARENA_init_param() {
     ARENA_tag[ARENA_TAG_MORE_LENGTH] = -1;
     ARENA_tag_struct recv_tag(ARENA_tag);
     ARENA_recv_list.push(recv_tag);
+
+#ifdef TRACE    
+    //traceout(ARENA_local_rank, SEND , TASK , 1, (ARENA_local_rank)%ARENA_nodes, 0);
+#endif
+
   }
 
   window_buffer = new float[DATA_BUFF_SIZE];
@@ -341,12 +419,18 @@ inline int ARENA_task_arrive() {
 #ifdef DEBUG
       cout<<"[bypass and terminate] rank "<<ARENA_local_rank<<endl;
 #endif
+      MPI_Wait(&request_task, &status);
       return ARENA_TERMINATE;
     } else {
       ARENA_terminate_count = ARENA_TERMINATE_TRH;
     }
   } else {
     ARENA_terminate_count = ARENA_TERMINATE_TRH;
+
+#ifdef TRACE
+  //traceout(ARENA_local_rank, RECV , TASK , 1, (ARENA_local_rank+ARENA_nodes-1)%ARENA_nodes, ARENA_task_size);
+#endif
+
   }
   return ARENA_CONTINUE;
 }
@@ -387,8 +471,8 @@ inline void ARENA_task_analyze() {
 
   ARENA_target_id = ARENA_tag[ARENA_TAG_TASK];
 
-  ARENA_target_start -= ARENA_local_bound;
-  ARENA_target_end   -= ARENA_local_bound;
+  ARENA_target_start -= ARENA_local_start;
+  ARENA_target_end   -= ARENA_local_start;
 
   if(ARENA_target_end > ARENA_target_start and ARENA_target_start > -1 and
      ARENA_target_end > -1) {
@@ -407,6 +491,11 @@ inline void ARENA_task_dispatch() {
     if(ARENA_remote_end <= ARENA_local_start or ARENA_remote_start >= ARENA_local_end) {
       ARENA_tag[ARENA_TAG_START] = ARENA_remote_start;
       ARENA_tag[ARENA_TAG_END]   = ARENA_remote_end;
+      
+#ifdef TRACE
+     //traceout(ARENA_local_rank, SEND , TASK , 1, (ARENA_local_rank+1)%ARENA_nodes, ARENA_task_size);
+#endif  
+
 #ifdef DEBUG
       cout<<"[enqueued send list bypass] rank "<<ARENA_local_rank<<" task "<<ARENA_tag[ARENA_TAG_TASK]<<" start "<<ARENA_tag[ARENA_TAG_START]<<" end "<<ARENA_tag[ARENA_TAG_END]<<" param "<<ARENA_tag[ARENA_TAG_PARAM]<<" send list size: "<<ARENA_send_list.size()<<endl;
 #endif
@@ -454,11 +543,16 @@ inline void ARENA_data_value_receive() {
 #ifdef DEBUG
     cout<<"[recving] rank "<<ARENA_local_rank<<" is waiting for receiving data from "<<ARENA_target_more_from<<endl;
 #endif
+
     ARENA_total_data_in += ARENA_target_more_length;
 
     MPI_Win_lock(MPI_LOCK_EXCLUSIVE, ARENA_target_more_from, 0, window);
     MPI_Get(ARENA_local_need_buff[ARENA_target_more_from], ARENA_target_more_length, MPI_FLOAT, ARENA_target_more_from, ARENA_target_more_start, ARENA_target_more_length, MPI_FLOAT, window);
     MPI_Win_unlock(ARENA_target_more_from, window);
+
+#ifdef TRACE
+    //traceout(ARENA_local_rank, RECV , DATA , 0, ARENA_target_more_from, ARENA_target_more_length*sizeof(float));
+#endif      
 
 //    if(ARENA_local_rank == 0) {
 //      cout<<"[MPI_Get] rank 0 see what get from "<<ARENA_target_more_from<<" range ("<<ARENA_target_more_start<<" to "<<ARENA_target_more_start + length<<"): ";
@@ -503,12 +597,19 @@ inline void ARENA_data_value_receive() {
 // -----------------------------------------------------------------------
 // Task execution.
 // -----------------------------------------------------------------------
-int ARENA_num_spawn = 0;
-inline int ARENA_task_exec() {
-  int new_spawn_count = ARENA_num_spawn;
+inline void ARENA_task_exec() {
   if(ARENA_target_end > ARENA_target_start and
      ARENA_target_end > -1 and ARENA_target_start > -1) {
-     new_spawn_count = (*(ARENA_kernel_map[ARENA_target_id]))(ARENA_target_start, ARENA_target_end, ARENA_target_param);
+    
+    bool require_data = false;
+    if(ARENA_target_more_length > 0)
+      require_data = true;
+    (*(ARENA_kernel_map[ARENA_target_id]))(ARENA_target_start, ARENA_target_end, ARENA_target_param, require_data, ARENA_target_more_length);
+
+#ifdef TRACE    
+    //traceout(ARENA_local_rank, EXEC , TASK , ARENA_task_latency, (ARENA_local_rank+ARENA_nodes-1)%ARENA_nodes, ARENA_task_size);
+#endif
+ 
 //    if(ARENA_target_id == 1) {
 //      new_param = ARENA_kernel(ARENA_target_start, ARENA_target_end, ARENA_target_param);
 ////    cout<<"[TEST] rank "<<ARENA_local_rank<<" start: "<<ARENA_target_start<<" end: "<<ARENA_target_end<<endl;
@@ -517,17 +618,13 @@ inline int ARENA_task_exec() {
 //    }
     MPI_Test(&request_profile, &flag_profile, &status_profile);
   }
-  if(new_spawn_count == -1)
-    new_spawn_count = ARENA_num_spawn;
-  ARENA_num_spawn = 0;
-  return new_spawn_count;
 }
 
 // -----------------------------------------------------------------------
 // Data value send.
 // -----------------------------------------------------------------------
 int ARENA_local_window_pos = 0;
-inline int ARENA_data_value_prepare(int t_from, float* t_start, int t_length) {
+inline int ARENA_data_value_prepare(float* t_start, int t_length) {
 //  ARENA_load_data(t_start, t_length, window_buffer);
   for(int i=0; i<t_length; ++i) {
     window_buffer[ARENA_local_window_pos] = *(t_start+i);
@@ -537,8 +634,13 @@ inline int ARENA_data_value_prepare(int t_from, float* t_start, int t_length) {
   //MPI_Send(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value);//, &request_data_value);
   //MPI_Ibsend(ARENA_remote_ask_buff[i], length, MPI_FLOAT, i, 0, comm_world_data_value, &request_data_value);
   //MPI_Wait(&request_task, &status);
+#ifdef TRACE
+//    traceout(ARENA_local_rank, SPAW , DATA , 0, i, t_length*sizeof(float));
+#endif  
+
+
 #ifdef DEBUG
-  cout<<"[prepare data] rank "<<ARENA_local_rank<<" from "<<t_from<<" with length "<<t_length<<endl;
+  cout<<"[prepare data] rank "<<ARENA_local_rank<<" from "<<ARENA_local_rank<<" with length "<<t_length<<endl;
 #endif
   return ARENA_local_window_pos - t_length;
 }
@@ -569,25 +671,37 @@ inline int ARENA_data_value_prepare(int t_from, float* t_start, int t_length) {
 //}
 
 // -----------------------------------------------------------------------
-// Task spawn. Based on the ARENA_spawn that will be customized by user.
+// Task issue. Issue the spawned tasks that is customized by users.
 // -----------------------------------------------------------------------
-inline void ARENA_task_spawn(int new_spawn_count) {
-  int spawn_count = 0;
-  for(int i=0; i<new_spawn_count; ++i) {
+inline void ARENA_task_issue() {
+  for(int i=0; i<ARENA_num_spawn; ++i) {
     if(ARENA_spawn[i].id != ARENA_NO_TASK) {
       ARENA_fill_tag(ARENA_spawn[i]);
-#ifdef DEBUG
-      cout<<"[enqueued spawn "<<spawn_count++<<"] rank "<<ARENA_local_rank<<" start "<<ARENA_tag[ARENA_TAG_START]<<" end "<<ARENA_tag[ARENA_TAG_END]<<" param "<<ARENA_tag[ARENA_TAG_PARAM]<<" task type "<<ARENA_tag[ARENA_TAG_TASK]<<endl;
-#endif
+//#ifdef DEBUG
+//      cout<<"[enqueued spawn "<<spawn_count++<<"] rank "<<ARENA_local_rank<<" start "<<ARENA_tag[ARENA_TAG_START]<<" end "<<ARENA_tag[ARENA_TAG_END]<<" param "<<ARENA_tag[ARENA_TAG_PARAM]<<" task type "<<ARENA_tag[ARENA_TAG_TASK]<<endl;
+//#endif
       if((ARENA_tag[ARENA_TAG_START] >= ARENA_local_end or ARENA_tag[ARENA_TAG_END] <= ARENA_local_start)) {
         ARENA_tag_struct temp_tag(ARENA_tag);
         ARENA_send_list.push(temp_tag);
+#ifdef TRACE
+      //traceout(ARENA_local_rank, SPAW , TASK , 1, (ARENA_local_rank+1)%ARENA_nodes, ARENA_task_size);
+#endif 
+
       } else {
         ARENA_tag_struct temp_tag(ARENA_tag);
         ARENA_recv_list.push(temp_tag);
+        
+#ifdef TRACE
+      //traceout(ARENA_local_rank, SPAW , TASK , 1, ARENA_local_rank, ARENA_task_size);
+#endif
+
       }
     }
   }
+
+  // reset ARENA_num_spawn
+  ARENA_num_spawn = 0;
+
 //  if(!ARENA_sent_task and !ARENA_send_list.empty()) {
   if(!ARENA_send_list.empty()) {
     //if(ARENA_send_list.size()>1)
@@ -651,7 +765,7 @@ inline void ARENA_send_task_tag() {
   #ifdef DEBUG
     cout<<"[sent] rank "<<ARENA_local_rank<<" start "<<ARENA_tag[ARENA_TAG_START]<<" end "<<ARENA_tag[ARENA_TAG_END]<<" param "<<ARENA_tag[ARENA_TAG_PARAM]<<endl;
   #endif
-    //MPI_Wait(&request_task, &status);
+    MPI_Wait(&request_task, &status);
   }
 }
 
@@ -659,31 +773,35 @@ inline void ARENA_send_task_tag() {
 // Spawn a task.
 // -----------------------------------------------------------------------
 inline void ARENA_spawn_task(int t_id, int t_start, int t_end, int t_param,
-                             int t_more_from, float* t_more_start, int t_more_length) {
+                             float* t_more_start = 0, int t_more_length = 0) {
     ARENA_spawn[ARENA_num_spawn].id          = t_id;
     ARENA_spawn[ARENA_num_spawn].start       = t_start;
     ARENA_spawn[ARENA_num_spawn].end         = t_end;
     ARENA_spawn[ARENA_num_spawn].param       = t_param;
-    ARENA_spawn[ARENA_num_spawn].more_from   = t_more_from;
 
     int window_pos = 0;
-    if(t_more_length > 0)
-      window_pos = ARENA_data_value_prepare(t_more_from, t_more_start, t_more_length);
-
-    ARENA_spawn[ARENA_num_spawn].more_start  = window_pos;
-    ARENA_spawn[ARENA_num_spawn].more_length = t_more_length;
+    if(t_more_length > 0) {
+      window_pos = ARENA_data_value_prepare(t_more_start, t_more_length);
+      ARENA_spawn[ARENA_num_spawn].more_from   = ARENA_local_rank;
+      ARENA_spawn[ARENA_num_spawn].more_start  = window_pos;
+      ARENA_spawn[ARENA_num_spawn].more_length = t_more_length;
+    } else {
+      ARENA_spawn[ARENA_num_spawn].more_from   = -1;
+      ARENA_spawn[ARENA_num_spawn].more_start  = -1;
+      ARENA_spawn[ARENA_num_spawn].more_length = -1;
+    }
 
     ARENA_num_spawn++;
 }
 
-inline void ARENA_spawn_task(int t_id, int t_start, int t_end, int t_param) {
-    ARENA_spawn[ARENA_num_spawn].id          = t_id;
-    ARENA_spawn[ARENA_num_spawn].start       = t_start;
-    ARENA_spawn[ARENA_num_spawn].end         = t_end;
-    ARENA_spawn[ARENA_num_spawn].param       = t_param;
-    ARENA_spawn[ARENA_num_spawn].more_from   = -1;
-    ARENA_spawn[ARENA_num_spawn].more_start  = -1;
-    ARENA_spawn[ARENA_num_spawn].more_length = -1;
-    ARENA_num_spawn++;
-}
+//inline void ARENA_spawn_task(int t_id, int t_start, int t_end, int t_param) {
+//    ARENA_spawn[ARENA_num_spawn].id          = t_id;
+//    ARENA_spawn[ARENA_num_spawn].start       = t_start;
+//    ARENA_spawn[ARENA_num_spawn].end         = t_end;
+//    ARENA_spawn[ARENA_num_spawn].param       = t_param;
+//    ARENA_spawn[ARENA_num_spawn].more_from   = -1;
+//    ARENA_spawn[ARENA_num_spawn].more_start  = -1;
+//    ARENA_spawn[ARENA_num_spawn].more_length = -1;
+//    ARENA_num_spawn++;
+//}
 
