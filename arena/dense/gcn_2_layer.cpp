@@ -41,6 +41,10 @@
 //#define NODES 8
 //#define NODES 16
 
+int local_rank;
+int local_start;
+int local_end;
+
 int num_vertice;
 int num_feature;
 int num_w0_out;
@@ -69,10 +73,6 @@ int LAYER1_OPT_ALL;
 void display_input();  // helper function
 void display_output(); // helper function
 bool verify(float**, float**);         // helper function
-
-int local_rank;
-int local_start;
-int local_end;
 
 // ----------------------------------------------------------------------
 // local data initialization.
